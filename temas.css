@@ -1,0 +1,328 @@
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Rajdhani:wght@400;600;700;800&family=Space+Mono:wght@400;700&display=swap');
+
+/* ============================================================
+   TEMA 1 — MIGUEL (Hollow Knight)
+   Estética sombria, minimalista e mística com glow pálido
+   ============================================================ */
+.tema-miguel {
+  --hk-bg: #0d0d14;
+  --hk-surface: #141428;
+  --hk-card: rgba(15, 15, 25, 0.88);
+  --hk-border: rgba(200, 216, 240, 0.06);
+  --hk-glow: #c8d8f0;
+  --hk-glow-soft: #8ab4f8;
+  --hk-accent: #4fc3f7;
+  --hk-gold: #f0d060;
+  --hk-text: #c8d8f0;
+  --hk-text-muted: #5a5a7a;
+  --hk-danger: #f87171;
+  --font-heading: 'Space Mono', monospace;
+  --font-body: 'Segoe UI', system-ui, sans-serif;
+}
+
+.tema-miguel {
+  font-family: var(--font-body);
+  background: linear-gradient(180deg, #0d0d14 0%, #141428 40%, #0d0d14 100%);
+  min-height: 100vh;
+  color: var(--hk-text);
+}
+
+.tema-miguel .container-painel {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 36px 32px;
+}
+
+.tema-miguel .titulo-usuario {
+  font-family: var(--font-heading);
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--hk-glow);
+  text-transform: uppercase;
+  letter-spacing: 3px;
+  margin-bottom: 4px;
+  text-shadow: 0 0 20px rgba(200, 216, 240, 0.15);
+}
+
+.tema-miguel .cofrinho-moedas {
+  background: linear-gradient(135deg, #141428 0%, #1c1c38 50%, #141428 100%);
+  border: 1px solid var(--hk-border);
+  border-radius: 20px;
+  padding: 28px 24px;
+  margin-bottom: 24px;
+  text-align: center;
+  box-shadow: 0 8px 32px rgba(79, 195, 247, 0.06);
+}
+
+.tema-miguel .cofrinho-moedas .saldo {
+  font-family: var(--font-heading);
+  font-size: 52px;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--hk-gold) 0%, #e0b020 50%, var(--hk-gold) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 0 20px rgba(240, 208, 96, 0.2));
+}
+
+.tema-miguel .cofrinho-moedas .barra-progresso {
+  height: 8px;
+  background: rgba(200, 216, 240, 0.06);
+  border-radius: 4px;
+  margin-top: 12px;
+  overflow: hidden;
+}
+
+.tema-miguel .cofrinho-moedas .barra-progresso .fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--hk-glow-soft), var(--hk-accent));
+  border-radius: 4px;
+  box-shadow: 0 0 12px rgba(79, 195, 247, 0.3);
+  transition: width 0.6s ease;
+}
+
+.tema-miguel .lista-tarefas {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tema-miguel .item-tarefa {
+  background: var(--hk-card);
+  border: 1px solid var(--hk-border);
+  border-left: 3px solid rgba(200, 216, 240, 0.1);
+  border-radius: 12px;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  backdrop-filter: blur(12px);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.tema-miguel .item-tarefa:hover {
+  border-left-color: rgba(200, 216, 240, 0.3);
+  box-shadow: 0 4px 20px rgba(79, 195, 247, 0.06);
+  transform: translateY(-1px);
+}
+
+.tema-miguel .item-tarefa .descricao {
+  font-size: 15px;
+  color: var(--hk-text);
+  font-weight: 500;
+}
+
+.tema-miguel .item-tarefa .descricao.feita {
+  color: var(--hk-text-muted);
+  text-decoration: line-through;
+}
+
+.tema-miguel .btn-concluir {
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: 13px;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  background: var(--hk-glow);
+  color: #0d0d14;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(200, 216, 240, 0.12);
+  transition: all 0.25s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.tema-miguel .btn-concluir:hover {
+  background: #e0ecff;
+  box-shadow: 0 6px 24px rgba(200, 216, 240, 0.25);
+  transform: translateY(-2px);
+}
+
+.tema-miguel .btn-concluir:active {
+  transform: translateY(0);
+}
+
+.tema-miguel .btn-concluir:disabled {
+  background: rgba(30, 30, 55, 0.5);
+  color: #3a3a5a;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+/* Fireflies background */
+.tema-miguel {
+  background-image:
+    radial-gradient(2px 2px at 12% 18%, rgba(200, 216, 240, 0.35), transparent),
+    radial-gradient(1.5px 1.5px at 28% 55%, rgba(160, 196, 255, 0.25), transparent),
+    radial-gradient(2.5px 2.5px at 52% 8%, rgba(200, 216, 240, 0.4), transparent),
+    radial-gradient(1.5px 1.5px at 72% 72%, rgba(160, 196, 255, 0.2), transparent),
+    radial-gradient(2px 2px at 88% 32%, rgba(200, 216, 240, 0.3), transparent),
+    radial-gradient(1.5px 1.5px at 22% 88%, rgba(160, 196, 255, 0.2), transparent);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
+
+/* ============================================================
+   TEMA 2 — RAFAELA (Stray Kids)
+   Estética streetwear, urbana, neon vermelho/preto
+   ============================================================ */
+.tema-rafaela {
+  --sk-bg: #1a1a1a;
+  --sk-surface: #2a1010;
+  --sk-card: rgba(28, 28, 28, 0.88);
+  --sk-border: rgba(230, 57, 70, 0.08);
+  --sk-red: #e63946;
+  --sk-red-bright: #ff6b6b;
+  --sk-gold: #f0d060;
+  --sk-text: #e0d0d0;
+  --sk-text-muted: #5a3a3a;
+  --sk-danger: #e63946;
+  --font-heading: 'Rajdhani', sans-serif;
+  --font-body: 'Segoe UI', system-ui, sans-serif;
+}
+
+.tema-rafaela {
+  font-family: var(--font-body);
+  background: linear-gradient(135deg, #1a1a1a 0%, #2a1a1a 30%, #1a1a2a 70%, #1a1a1a 100%);
+  min-height: 100vh;
+  color: var(--sk-text);
+}
+
+.tema-rafaela .container-painel {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 36px 32px;
+}
+
+.tema-rafaela .titulo-usuario {
+  font-family: var(--font-heading);
+  font-size: 32px;
+  font-weight: 800;
+  color: var(--sk-red-bright);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  margin-bottom: 4px;
+  text-shadow: 0 0 30px rgba(230, 57, 70, 0.2);
+}
+
+.tema-rafaela .cofrinho-moedas {
+  background: linear-gradient(135deg, #2a1010 0%, #3a1515 50%, #2a1010 100%);
+  border: 1px solid rgba(230, 57, 70, 0.15);
+  border-radius: 16px;
+  padding: 28px 24px;
+  margin-bottom: 24px;
+  text-align: center;
+  box-shadow: 0 8px 32px rgba(230, 57, 70, 0.1);
+}
+
+.tema-rafaela .cofrinho-moedas .saldo {
+  font-family: var(--font-heading);
+  font-size: 52px;
+  font-weight: 800;
+  background: linear-gradient(135deg, var(--sk-gold) 0%, #e0b020 50%, var(--sk-gold) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 0 20px rgba(240, 208, 96, 0.15));
+}
+
+.tema-rafaela .cofrinho-moedas .barra-progresso {
+  height: 8px;
+  background: rgba(230, 57, 70, 0.08);
+  border-radius: 4px;
+  margin-top: 12px;
+  overflow: hidden;
+}
+
+.tema-rafaela .cofrinho-moedas .barra-progresso .fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--sk-red), var(--sk-red-bright));
+  border-radius: 4px;
+  box-shadow: 0 0 12px rgba(230, 57, 70, 0.3);
+  transition: width 0.6s ease;
+}
+
+.tema-rafaela .lista-tarefas {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tema-rafaela .item-tarefa {
+  background: var(--sk-card);
+  border: 1px solid var(--sk-border);
+  border-left: 3px solid rgba(230, 57, 70, 0.2);
+  border-radius: 12px;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  backdrop-filter: blur(12px);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.tema-rafaela .item-tarefa:hover {
+  border-left-color: rgba(230, 57, 70, 0.45);
+  box-shadow: 0 4px 20px rgba(230, 57, 70, 0.06);
+  transform: translateY(-1px);
+}
+
+.tema-rafaela .item-tarefa .descricao {
+  font-size: 15px;
+  color: var(--sk-text);
+  font-weight: 500;
+}
+
+.tema-rafaela .item-tarefa .descricao.feita {
+  color: var(--sk-text-muted);
+  text-decoration: line-through;
+}
+
+.tema-rafaela .btn-concluir {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 14px;
+  padding: 10px 22px;
+  border: none;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--sk-red), var(--sk-red-bright));
+  color: white;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(230, 57, 70, 0.25);
+  transition: all 0.25s ease;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.tema-rafaela .btn-concluir:hover {
+  box-shadow: 0 6px 24px rgba(230, 57, 70, 0.4);
+  transform: translateY(-2px);
+}
+
+.tema-rafaela .btn-concluir:active {
+  transform: translateY(0);
+}
+
+.tema-rafaela .btn-concluir:disabled {
+  background: rgba(230, 57, 70, 0.08);
+  color: var(--sk-text-muted);
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+/* Neon particles background */
+.tema-rafaela {
+  background-image:
+    radial-gradient(2px 2px at 12% 20%, rgba(230, 57, 70, 0.2), transparent),
+    radial-gradient(1.5px 1.5px at 38% 52%, rgba(230, 57, 70, 0.15), transparent),
+    radial-gradient(2px 2px at 58% 8%, rgba(230, 57, 70, 0.25), transparent),
+    radial-gradient(1.5px 1.5px at 78% 68%, rgba(230, 57, 70, 0.15), transparent),
+    radial-gradient(2px 2px at 90% 35%, rgba(230, 57, 70, 0.2), transparent),
+    radial-gradient(1.5px 1.5px at 22% 82%, rgba(230, 57, 70, 0.15), transparent);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
