@@ -1,10 +1,10 @@
 <?php
-// conexao.php
+// conexao.php atualizado para a InfinityFree
 
-$host = '127.0.0.1';
-$db   = 'sistema_tarefas';
-$user = 'root';
-$pass = ''; // No XAMPP por padrão a senha é vazia
+$host = 'sql213.infinityfree.com'; // Seu MySQL Hostname
+$db   = 'if0_41940320_listatarefas'; // O nome exato que aparece no seu phpMyAdmin (vimos no print anterior)
+$user = 'if0_41940320'; // Seu MySQL Username
+$pass = 'Girlhell12345'; // A senha que aparece quando você clica no "olho" no painel
 $charset = 'utf8mb4';
 
 $dsn = "mysql:host=$host;dbname=$db;charset=$charset";

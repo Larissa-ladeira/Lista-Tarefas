@@ -78,6 +78,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['resgatar_premio'])) {
     }
 }
 
+// Trocar senha do admin
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['trocar_senha_admin'])) {
+    $senha_atual = $_POST['senha_atual'];
+    $nova_senha = $_POST['nova_senha'];
+    $confirmar = $_POST['confirmar_senha'];
+    $admin_id = $_SESSION['usuario_id'];
+
+    $stmt = $pdo->prepare("SELECT senha FROM usuarios WHERE id = ?");
+    $stmt->execute([$admin_id]);
+    $admin = $stmt->fetch();
+
+    if (!password_verify($senha_atual, $admin['senha'])) {
+        $mensagem = "Senha atual incorreta."; $tipo_mensagem = 'erro';
+    } elseif (strlen($nova_senha) < 4) {
+        $mensagem = "A nova senha deve ter pelo menos 4 caracteres."; $tipo_mensagem = 'erro';
+    } elseif ($nova_senha !== $confirmar) {
+        $mensagem = "A confirmação não coincide com a nova senha."; $tipo_mensagem = 'erro';
+    } else {
+        $hash = password_hash($nova_senha, PASSWORD_DEFAULT);
+        $pdo->prepare("UPDATE usuarios SET senha = ? WHERE id = ?")->execute([$hash, $admin_id]);
+        $mensagem = "✅ Sua senha foi alterada com sucesso!";
+    }
+}
+
+// Trocar senha de criança (autorizado pela senha do admin)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['trocar_senha_crianca'])) {
+    $senha_admin = $_POST['senha_admin'];
+    $crianca_id = (int)$_POST['crianca_id'];
+    $nova_senha = $_POST['nova_senha_crianca'];
+    $confirmar = $_POST['confirmar_senha_crianca'];
+    $admin_id = $_SESSION['usuario_id'];
+
+    // Verificar senha do admin
+    $stmt = $pdo->prepare("SELECT senha FROM usuarios WHERE id = ?");
+    $stmt->execute([$admin_id]);
+    $admin = $stmt->fetch();
+
+    if (!password_verify($senha_admin, $admin['senha'])) {
+        $mensagem = "Senha do admin incorreta. Autorização negada."; $tipo_mensagem = 'erro';
+    } elseif (strlen($nova_senha) < 4) {
+        $mensagem = "A nova senha deve ter pelo menos 4 caracteres."; $tipo_mensagem = 'erro';
+    } elseif ($nova_senha !== $confirmar) {
+        $mensagem = "A confirmação não coincide com a nova senha."; $tipo_mensagem = 'erro';
+    } else {
+        // Verificar se o destino é realmente uma criança
+        $stmt = $pdo->prepare("SELECT id FROM usuarios WHERE id = ? AND perfil = 'crianca'");
+        $stmt->execute([$crianca_id]);
+        if (!$stmt->fetch()) {
+            $mensagem = "Criança não encontrada."; $tipo_mensagem = 'erro';
+        } else {
+            $hash = password_hash($nova_senha, PASSWORD_DEFAULT);
+            $pdo->prepare("UPDATE usuarios SET senha = ? WHERE id = ?")->execute([$hash, $crianca_id]);
+            $mensagem = "✅ Senha da criança alterada com sucesso!";
+        }
+    }
+}
+
 // Buscar crianças
 $stmt = $pdo->query("SELECT id, nome, moedas FROM usuarios WHERE perfil = 'crianca' ORDER BY nome ASC");
 $criancas = $stmt->fetchAll();
@@ -138,6 +195,10 @@ foreach ($todas_concluidas as $c) {
                 <button class="sidebar-item" data-tab="concluidas">
                     <span class="si-icon">✅</span>
                     <span class="si-text">Tarefas Concluídas</span>
+                </button>
+                <button class="sidebar-item" data-tab="senhas">
+                    <span class="si-icon">🔑</span>
+                    <span class="si-text">Senhas</span>
                 </button>
             </nav>
             <div class="sidebar-footer">
@@ -357,6 +418,65 @@ foreach ($todas_concluidas as $c) {
                         </div>
                     <?php endforeach; ?>
                 <?php endif; ?>
+            </section>
+
+            <!-- ===== TAB: SENHAS ===== -->
+            <section class="admin-tab" id="tab-senhas" style="display:none">
+                <div class="tab-header">
+                    <h2>🔑 Gerenciar Senhas</h2>
+                    <p>Altere sua senha ou a senha das crianças</p>
+                </div>
+
+                <!-- Admin password -->
+                <div class="admin-form-card">
+                    <h3>👤 Minha Senha (Admin)</h3>
+                    <form method="POST" class="senha-form">
+                        <div class="form-group">
+                            <label>Senha Atual</label>
+                            <input type="password" name="senha_atual" placeholder="Digite sua senha atual" required minlength="4">
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Nova Senha</label>
+                                <input type="password" name="nova_senha" placeholder="Nova senha" required minlength="4">
+                            </div>
+                            <div class="form-group">
+                                <label>Confirmar</label>
+                                <input type="password" name="confirmar_senha" placeholder="Confirme a nova senha" required minlength="4">
+                            </div>
+                        </div>
+                        <button type="submit" name="trocar_senha_admin" class="btn-add">Alterar Minha Senha</button>
+                    </form>
+                </div>
+
+                <!-- Children password -->
+                <div class="admin-form-card">
+                    <h3>👶 Senha das Crianças</h3>
+                    <p class="senha-aviso">⚠️ Digite <strong>sua senha de admin</strong> para autorizar a alteração.</p>
+                    <?php foreach ($criancas as $crianca): ?>
+                        <div class="senha-crianca-card">
+                            <div class="senha-crianca-nome"><?php echo htmlspecialchars($crianca['nome']); ?></div>
+                            <form method="POST" class="senha-form">
+                                <input type="hidden" name="crianca_id" value="<?php echo $crianca['id']; ?>">
+                                <div class="form-group">
+                                    <label>Sua senha (Admin) para autorizar</label>
+                                    <input type="password" name="senha_admin" placeholder="Sua senha de admin" required minlength="4">
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label>Nova senha para <?php echo htmlspecialchars($crianca['nome']); ?></label>
+                                        <input type="password" name="nova_senha_crianca" placeholder="Nova senha" required minlength="4">
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Confirmar</label>
+                                        <input type="password" name="confirmar_senha_crianca" placeholder="Confirme" required minlength="4">
+                                    </div>
+                                </div>
+                                <button type="submit" name="trocar_senha_crianca" class="btn-add">Alterar Senha de <?php echo htmlspecialchars($crianca['nome']); ?></button>
+                            </form>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
             </section>
 
         </main>

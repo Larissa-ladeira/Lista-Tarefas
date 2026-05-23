@@ -2442,6 +2442,87 @@ body {
 }
 
 /* =====================================================
+   ADMIN — SENHAS TAB
+   ===================================================== */
+.senha-form {
+  width: 100%;
+}
+
+.senha-form .form-row {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.senha-form .form-row .form-group {
+  flex: 1;
+}
+
+.senha-form .form-group {
+  margin-bottom: 16px;
+}
+
+.senha-form label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--admin-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 6px;
+}
+
+.senha-form input[type="password"] {
+  width: 100%;
+  padding: 11px 14px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--admin-radius-sm);
+  font-size: 14px;
+  font-family: var(--font);
+  color: var(--admin-text);
+  background: rgba(255, 255, 255, 0.03);
+  outline: none;
+  transition: all 0.2s;
+  box-sizing: border-box;
+}
+
+.senha-form input[type="password"]:focus {
+  border-color: rgba(124, 130, 255, 0.4);
+  box-shadow: 0 0 0 3px rgba(124, 130, 255, 0.08);
+}
+
+.senha-form input[type="password"]::placeholder {
+  color: #4a5080;
+}
+
+.senha-aviso {
+  color: var(--admin-text-muted);
+  font-size: 13px;
+  margin: -10px 0 20px;
+  padding: 10px 14px;
+  background: rgba(255, 193, 7, 0.08);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 193, 7, 0.12);
+}
+
+.senha-crianca-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--admin-border);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+
+.senha-crianca-nome {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--admin-text);
+  margin-bottom: 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--admin-border);
+}
+
+/* =====================================================
    ADMIN — CONCLUÍDAS TAB
    ===================================================== */
 .concluidas-resumo {
