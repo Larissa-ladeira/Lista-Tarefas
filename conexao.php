@@ -1,5 +1,9 @@
 <?php
-require_once 'config.php';
+if (file_exists('config-real.php')) {
+    require_once 'config-real.php';
+} else {
+    require_once 'config.php';
+}
 
 $dsn = "mysql:host=$host;dbname=$db;charset=$charset";
 $options = [
