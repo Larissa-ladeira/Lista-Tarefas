@@ -31,7 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['concluir_tarefa'])) {
             $upd = $pdo->prepare("UPDATE usuarios SET moedas = moedas + 1 WHERE id = ?");
             $upd->execute([$usuario_id]);
             $pdo->commit();
-            header("Location: tarefas.php?sucesso=1");
+            header("Location: Tarefas.php?sucesso=1");
             exit;
         } catch (Exception $e) {
             $pdo->rollBack();
@@ -187,7 +187,7 @@ $total_feitas = $total_concluidas->fetchColumn();
                             <?php if ($tarefa['feita_hoje']): ?>
                                 <button class="btn-feita" disabled>✅ Feito</button>
                             <?php else: ?>
-                                <form action="tarefas.php" method="POST" style="margin: 0;">
+                                <form action="Tarefas.php" method="POST" style="margin: 0;">
                                     <input type="hidden" name="tarefa_id" value="<?php echo $tarefa['id']; ?>">
                                     <button type="submit" name="concluir_tarefa" class="btn-concluir">Concluí! +1 💰</button>
                                 </form>

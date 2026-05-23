@@ -11,7 +11,7 @@ try {
         FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
     )");
     echo "✅ Tabela 'premios_resgatados' criada com sucesso!<br>";
-    echo "<a href='tarefas.php'>Ir para o painel</a>";
+    echo "<a href='Tarefas.php'>Ir para o painel</a>";
 } catch (Exception $e) {
     echo "❌ Erro: " . $e->getMessage();
 }
