@@ -29,7 +29,7 @@ try {
 
     echo "<h2 style='color: green;'>✔️ Banco de dados sincronizado e limpo com sucesso!</h2>";
     echo "<p>Os 3 usuários foram reiniciados com a senha: <strong>123456</strong></p>";
-    echo "<a href='index.php'>Ir para a Tela de Login</a>";
+    echo "<a href='index.html'>Ir para a Tela de Login</a>";
 
 } catch (Exception $e) {
     echo "<h2 style='color: red;'>❌ Erro ao resetar:</h2> " . $e->getMessage();
