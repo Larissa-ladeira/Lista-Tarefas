@@ -1,4 +1,5 @@
 <?php
+session_save_path(__DIR__ . '/sessions');
 session_start();
 require_once 'conexao.php';
 
