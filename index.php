@@ -4,7 +4,11 @@ ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
-session_save_path(__DIR__ . '/sessions');
+$sessao_dir = __DIR__ . '/sessions';
+if (!is_dir($sessao_dir)) {
+    mkdir($sessao_dir, 0777, true);
+}
+session_save_path($sessao_dir);
 session_start();
 require_once 'conexao.php';
 
