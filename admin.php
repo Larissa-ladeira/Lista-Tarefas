@@ -80,9 +80,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['resgatar_premio'])) {
 
 // Trocar senha do admin
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['trocar_senha_admin'])) {
-    $senha_atual = $_POST['senha_atual'];
-    $nova_senha = $_POST['nova_senha'];
-    $confirmar = $_POST['confirmar_senha'];
+    $senha_atual = trim($_POST['senha_atual']);
+    $nova_senha = trim($_POST['nova_senha']);
+    $confirmar = trim($_POST['confirmar_senha']);
     $admin_id = $_SESSION['usuario_id'];
 
     $stmt = $pdo->prepare("SELECT senha FROM usuarios WHERE id = ?");
@@ -104,10 +104,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['trocar_senha_admin'])
 
 // Trocar senha de criança (autorizado pela senha do admin)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['trocar_senha_crianca'])) {
-    $senha_admin = $_POST['senha_admin'];
+    $senha_admin = trim($_POST['senha_admin']);
     $crianca_id = (int)$_POST['crianca_id'];
-    $nova_senha = $_POST['nova_senha_crianca'];
-    $confirmar = $_POST['confirmar_senha_crianca'];
+    $nova_senha = trim($_POST['nova_senha_crianca']);
+    $confirmar = trim($_POST['confirmar_senha_crianca']);
     $admin_id = $_SESSION['usuario_id'];
 
     // Verificar senha do admin
