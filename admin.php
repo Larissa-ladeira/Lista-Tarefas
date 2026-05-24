@@ -4,7 +4,7 @@ session_start();
 require_once 'conexao.php';
 
 if (!isset($_SESSION['usuario_id']) || $_SESSION['usuario_perfil'] !== 'admin') {
-    header('Location: index.html');
+    header('Location: index.php');
     exit;
 }
 
