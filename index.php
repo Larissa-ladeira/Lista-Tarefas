@@ -4,7 +4,7 @@ ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
-@session_start();
+session_start();
 require_once 'conexao.php';
 
 $erro = '';
@@ -60,7 +60,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <p class="erro"><?php echo $erro; ?></p>
         <?php endif; ?>
 
-        <form action="" method="POST">
+        <form action="index.php" method="POST">
             <label for="login">Login</label>
             <input type="text" name="login" id="login" placeholder="Digite o login" required autofocus>
 
