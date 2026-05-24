@@ -1,5 +1,2 @@
 config.php
 config-real.php
-sessions/*
-!sessions/.gitkeep
-!sessions/.htaccess
