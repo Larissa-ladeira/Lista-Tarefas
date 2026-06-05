@@ -178,6 +178,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['trocar_senha_crianca'
     }
 }
 
+// Criar novo perfil de criança
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['criar_crianca'])) {
+    csrf_validate();
+    $nome = trim($_POST['nome']);
+    $username = trim($_POST['username']);
+    $senha = trim($_POST['senha']);
+    if (!empty($nome) && !empty($username) && !empty($senha)) {
+        $hash = password_hash($senha, PASSWORD_DEFAULT);
+        $stmt = $pdo->prepare("INSERT INTO usuarios (nome, username, senha, perfil, moedas) VALUES (?, ?, ?, 'crianca', 0)");
+        try {
+            $stmt->execute([$nome, $username, $hash]);
+            $mensagem = "✅ Perfil de {$nome} criado com sucesso!";
+        } catch (\PDOException $e) {
+            $mensagem = "Erro: username '{$username}' já existe.";
+            $tipo_mensagem = 'erro';
+        }
+    } else {
+        $mensagem = "Preencha todos os campos.";
+        $tipo_mensagem = 'erro';
+    }
+}
+
 // Buscar crianças
 $stmt = $pdo->query("SELECT id, nome, moedas FROM usuarios WHERE perfil = 'crianca' ORDER BY nome ASC");
 $criancas = $stmt->fetchAll();
@@ -317,6 +339,10 @@ $sugestoes_pendentes = $pdo->query("SELECT COUNT(*) FROM sugestoes_premios WHERE
                 <button class="sidebar-item" data-tab="moedas">
                     <span class="si-icon">💰</span>
                     <span class="si-text">Cofrinho</span>
+                </button>
+                <button class="sidebar-item" data-tab="criancas">
+                    <span class="si-icon">👶</span>
+                    <span class="si-text">Crianças</span>
                 </button>
                 <button class="sidebar-item" data-tab="tarefas">
                     <span class="si-icon">📋</span>
@@ -493,6 +519,61 @@ $sugestoes_pendentes = $pdo->query("SELECT COUNT(*) FROM sugestoes_premios WHERE
                             </div>
                         </div>
                     <?php endforeach; ?>
+                </div>
+            </section>
+
+            <!-- ===== TAB: CRIANÇAS ===== -->
+            <section class="admin-tab" id="tab-criancas" style="display:none">
+                <div class="tab-header">
+                    <h2>👶 Gerenciar Crianças</h2>
+                    <p>Crie novos perfis para as crianças</p>
+                </div>
+
+                <div class="form-card">
+                    <h3>✏️ Novo Perfil</h3>
+                    <form method="POST" class="form-criar-crianca">
+                        <div class="form-group">
+                            <label for="nome">Nome completo</label>
+                            <input type="text" name="nome" id="nome" placeholder="Ex: Miguel" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="username">Username (login)</label>
+                            <input type="text" name="username" id="username" placeholder="Ex: miguel" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="senha">Senha</label>
+                            <input type="password" name="senha" id="senha" placeholder="Senha de acesso" required>
+                        </div>
+                        <button type="submit" name="criar_crianca" class="btn-criar">Criar Perfil</button>
+                    </form>
+                </div>
+
+                <div class="list-card">
+                    <h3>📋 Crianças Cadastradas</h3>
+                    <?php if (count($criancas) > 0): ?>
+                        <div class="criancas-table-wrapper">
+                            <table class="criancas-table">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Nome</th>
+                                        <th>Moedas</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($criancas as $c): ?>
+                                        <tr>
+                                            <td><?php echo $c['id']; ?></td>
+                                            <td><?php echo htmlspecialchars($c['nome']); ?></td>
+                                            <td><?php echo (int)$c['moedas']; ?></td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    <?php else: ?>
+                        <p class="empty-msg">Nenhuma criança cadastrada ainda.</p>
+                    <?php endif; ?>
                 </div>
             </section>
 

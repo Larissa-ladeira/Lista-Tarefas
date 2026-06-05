@@ -3508,6 +3508,142 @@ body {
   gap: 8px;
 }
 
+/* =====================================================
+   ADMIN — CRIANÇAS TAB
+   ===================================================== */
+.form-card {
+  background: var(--card-shadow);
+  border: 1px solid var(--sangue-fundo);
+  box-shadow: 0 0 10px rgba(74, 2, 2, 0.2);
+  padding: 28px 26px;
+  border-radius: 16px;
+  margin-bottom: 20px;
+}
+
+.form-card h3 {
+  margin: 0 0 20px;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--neon-cyan);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.form-criar-crianca .form-group {
+  margin-bottom: 16px;
+}
+
+.form-criar-crianca label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--neon-cyan);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  margin-bottom: 6px;
+}
+
+.form-criar-crianca input[type="text"],
+.form-criar-crianca input[type="password"] {
+  width: 100%;
+  padding: 11px 14px;
+  border: 1px solid var(--sangue-fundo);
+  border-radius: var(--admin-radius-sm);
+  font-size: 14px;
+  font-family: var(--font);
+  color: var(--neon-light);
+  background: rgba(5, 7, 8, 0.6);
+  outline: none;
+  transition: all 0.2s;
+  box-sizing: border-box;
+}
+
+.form-criar-crianca input:focus {
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 0 3px rgba(0, 240, 255, 0.08);
+}
+
+.form-criar-crianca input::placeholder {
+  color: var(--neon-light);
+}
+
+.btn-criar {
+  width: 100%;
+  padding: 14px;
+  margin-top: 6px;
+  background: linear-gradient(135deg, var(--neon-glow), var(--neon-cyan));
+  color: var(--bg-ritual);
+  border: none;
+  border-radius: var(--admin-radius-sm);
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: var(--font);
+}
+
+.btn-criar:hover {
+  filter: brightness(1.2);
+  transform: translateY(-1px);
+}
+
+.list-card {
+  background: var(--card-shadow);
+  border: 1px solid var(--sangue-fundo);
+  box-shadow: 0 0 10px rgba(74, 2, 2, 0.2);
+  padding: 28px 26px;
+  border-radius: 16px;
+}
+
+.list-card h3 {
+  margin: 0 0 20px;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--neon-cyan);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.criancas-table-wrapper {
+  overflow-x: auto;
+}
+
+.criancas-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.criancas-table th {
+  text-align: left;
+  padding: 10px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--neon-cyan);
+  border-bottom: 1px solid var(--sangue-fundo);
+}
+
+.criancas-table td {
+  padding: 10px 14px;
+  color: var(--neon-light);
+  border-bottom: 1px solid rgba(74, 2, 2, 0.3);
+}
+
+.criancas-table tbody tr:hover {
+  background: rgba(0, 240, 255, 0.02);
+}
+
+.empty-msg {
+  color: var(--neon-light);
+  font-style: italic;
+  text-align: center;
+  padding: 30px 0;
+}
+
 .admin-task-form .form-row,
 .senha-form .form-row {
   display: flex;
