@@ -7,6 +7,16 @@ if (!isset($_SESSION['usuario_id']) || $_SESSION['usuario_perfil'] !== 'admin') 
     exit;
 }
 
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+function csrf_token() { return $_SESSION['csrf_token']; }
+function csrf_validate() {
+    if (!isset($_POST['csrf_token']) || $_POST['csrf_token'] !== $_SESSION['csrf_token']) {
+        die('Requisição inválida.');
+    }
+}
+
 $mensagem = '';
 $tipo_mensagem = 'sucesso';
 
@@ -15,19 +25,25 @@ $dias_nomes = [
     3 => 'Quarta-feira', 4 => 'Quinta-feira', 5 => 'Sexta-feira', 6 => 'Sábado'
 ];
 
+$metas_moedas = [150, 300, 500, 700, 900, 1100];
+
 // Adicionar tarefa
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['adicionar_tarefa'])) {
+    csrf_validate();
     $crianca_id = (int)$_POST['crianca_id'];
     $dia_semana = (int)$_POST['dia_semana'];
     $descricao = trim($_POST['descricao']);
+    $valor = (int)$_POST['valor'];
+    if ($valor < 1) $valor = 1;
     if (!empty($descricao) && $crianca_id > 0 && $dia_semana >= 0 && $dia_semana <= 6) {
-        $pdo->prepare("INSERT INTO tarefas_semana (usuario_id, descricao, dia_semana) VALUES (?, ?, ?)")->execute([$crianca_id, $descricao, $dia_semana]);
+        $pdo->prepare("INSERT INTO tarefas_semana (usuario_id, descricao, valor, dia_semana) VALUES (?, ?, ?, ?)")->execute([$crianca_id, $descricao, $valor, $dia_semana]);
         $mensagem = "Tarefa adicionada com sucesso!";
     } else { $mensagem = "Preencha todos os campos."; $tipo_mensagem = 'erro'; }
 }
 
 // Deletar tarefa
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['deletar_tarefa'])) {
+    csrf_validate();
     $tarefa_id = (int)$_POST['tarefa_id'];
     $pdo->prepare("DELETE FROM tarefas_cumpridas WHERE tarefa_id = ?")->execute([$tarefa_id]);
     $pdo->prepare("DELETE FROM tarefas_semana WHERE id = ?")->execute([$tarefa_id]);
@@ -36,50 +52,76 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['deletar_tarefa'])) {
 
 // Editar tarefa
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['editar_tarefa'])) {
+    csrf_validate();
     $tarefa_id = (int)$_POST['tarefa_id'];
     $nova_descricao = trim($_POST['descricao']);
+    $novo_valor = isset($_POST['valor']) ? (int)$_POST['valor'] : 0;
     if (!empty($nova_descricao)) {
-        $pdo->prepare("UPDATE tarefas_semana SET descricao = ? WHERE id = ?")->execute([$nova_descricao, $tarefa_id]);
+        if ($novo_valor > 0) {
+            $pdo->prepare("UPDATE tarefas_semana SET descricao = ?, valor = ? WHERE id = ?")->execute([$nova_descricao, $novo_valor, $tarefa_id]);
+        } else {
+            $pdo->prepare("UPDATE tarefas_semana SET descricao = ? WHERE id = ?")->execute([$nova_descricao, $tarefa_id]);
+        }
         $mensagem = "Tarefa atualizada!";
     } else { $mensagem = "Descrição vazia."; $tipo_mensagem = 'erro'; }
 }
 
 // Dar bônus
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['dar_bonus'])) {
+    csrf_validate();
     $crianca_id = (int)$_POST['crianca_id'];
     $quantia = (int)$_POST['quantia'];
     if ($crianca_id > 0 && $quantia > 0) {
         $pdo->prepare("UPDATE usuarios SET moedas = moedas + ? WHERE id = ?")->execute([$quantia, $crianca_id]);
+        $pdo->prepare("INSERT INTO historico_moedas (usuario_id, quantia, tipo, descricao) VALUES (?, ?, 'ganhou', 'Bônus da TIA')")->execute([$crianca_id, $quantia]);
         $mensagem = "Bônus de +$quantia moedas aplicado!";
     } else { $mensagem = "Valor inválido."; $tipo_mensagem = 'erro'; }
 }
 
 // Aplicar multa
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['aplicar_multa'])) {
+    csrf_validate();
     $crianca_id = (int)$_POST['crianca_id'];
     $quantia = (int)$_POST['quantia'];
     if ($crianca_id > 0 && $quantia > 0) {
         $stmt = $pdo->prepare("UPDATE usuarios SET moedas = GREATEST(0, moedas - ?) WHERE id = ?");
         $stmt->execute([$quantia, $crianca_id]);
+        $pdo->prepare("INSERT INTO historico_moedas (usuario_id, quantia, tipo, descricao) VALUES (?, ?, 'perdeu', 'Multa aplicada')")->execute([$crianca_id, $quantia]);
         $mensagem = "Multa de -$quantia moedas aplicada.";
     } else { $mensagem = "Valor inválido."; $tipo_mensagem = 'erro'; }
 }
 
+function meta_atual($moedas) {
+    $metas = [150, 300, 500, 700, 900, 1100];
+    $escolhida = 150;
+    foreach ($metas as $m) {
+        if ($moedas >= $m) { $escolhida = $m; }
+    }
+    return $escolhida;
+}
+
 // Resgatar prêmio
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['resgatar_premio'])) {
+    csrf_validate();
     $crianca_id = (int)$_POST['crianca_id'];
-    $stmt = $pdo->prepare("UPDATE usuarios SET moedas = GREATEST(0, moedas - 150) WHERE id = ? AND moedas >= 150");
-    $stmt->execute([$crianca_id]);
+    $stmt_m = $pdo->prepare("SELECT moedas FROM usuarios WHERE id = ?");
+    $stmt_m->execute([$crianca_id]);
+    $moedas_crianca = (int)$stmt_m->fetchColumn();
+    $meta_valor = meta_atual($moedas_crianca);
+    $stmt = $pdo->prepare("UPDATE usuarios SET moedas = GREATEST(0, moedas - ?) WHERE id = ? AND moedas >= ?");
+    $stmt->execute([$meta_valor, $crianca_id, $meta_valor]);
     if ($stmt->rowCount() > 0) {
-        $mensagem = "Prêmio resgatado! Saldo zerado, novo ciclo iniciado! 🎉";
+        $pdo->prepare("INSERT INTO historico_moedas (usuario_id, quantia, tipo, descricao) VALUES (?, ?, 'perdeu', ?)")->execute([$crianca_id, $meta_valor, "Prêmio de {$meta_valor} moedas resgatado"]);
+        $mensagem = "Prêmio de {$meta_valor} moedas resgatado! 🎉";
     } else {
-        $mensagem = "Essa criança ainda não atingiu 150 moedas.";
+        $mensagem = "Essa criança não atingiu a meta de {$meta_valor} moedas.";
         $tipo_mensagem = 'erro';
     }
 }
 
 // Trocar senha do admin
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['trocar_senha_admin'])) {
+    csrf_validate();
     $senha_atual = trim($_POST['senha_atual']);
     $nova_senha = trim($_POST['nova_senha']);
     $confirmar = trim($_POST['confirmar_senha']);
@@ -104,6 +146,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['trocar_senha_admin'])
 
 // Trocar senha de criança (autorizado pela senha do admin)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['trocar_senha_crianca'])) {
+    csrf_validate();
     $senha_admin = trim($_POST['senha_admin']);
     $crianca_id = (int)$_POST['crianca_id'];
     $nova_senha = trim($_POST['nova_senha_crianca']);
@@ -139,12 +182,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['trocar_senha_crianca'
 $stmt = $pdo->query("SELECT id, nome, moedas FROM usuarios WHERE perfil = 'crianca' ORDER BY nome ASC");
 $criancas = $stmt->fetchAll();
 
-// Buscar tarefas de cada criança
+// Buscar tarefas de cada criança (otimizado: 1 query)
 $tarefas_por_usuario = [];
-foreach ($criancas as $crianca) {
-    $stmt = $pdo->prepare("SELECT id, descricao, dia_semana FROM tarefas_semana WHERE usuario_id = ? ORDER BY dia_semana, id");
-    $stmt->execute([$crianca['id']]);
-    $tarefas_por_usuario[$crianca['id']] = $stmt->fetchAll();
+$todas_tarefas = $pdo->query("SELECT id, usuario_id, descricao, valor, dia_semana FROM tarefas_semana ORDER BY usuario_id, dia_semana, id")->fetchAll();
+foreach ($todas_tarefas as $t) {
+    $tarefas_por_usuario[$t['usuario_id']][] = $t;
+}
+
+// Enviar mensagem da TIA
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enviar_mensagem'])) {
+    csrf_validate();
+    $crianca_id = (int)$_POST['crianca_id_msg'];
+    $texto = trim($_POST['texto_mensagem']);
+    if ($crianca_id > 0 && !empty($texto)) {
+        $pdo->prepare("INSERT INTO mensagens (remetente_id, destinatario_id, mensagem) VALUES (NULL, ?, ?)")->execute([$crianca_id, $texto]);
+        $mensagem = "💬 Mensagem enviada com sucesso!";
+    } else { $mensagem = "Preencha todos os campos."; $tipo_mensagem = 'erro'; }
+}
+
+// Marcar mensagens das crianças como lidas
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['marcar_msg_crianca_lidas'])) {
+    csrf_validate();
+    $pdo->exec("UPDATE mensagens SET lida = 1 WHERE remetente_id IS NOT NULL AND lida = 0");
+    header("Location: admin.php#tab-mensagens");
+    exit;
+}
+
+// Buscar notificações não lidas
+$notificacoes = $pdo->query("SELECT * FROM notificacoes ORDER BY criada_em DESC LIMIT 50")->fetchAll();
+$notificacoes_nao_lidas = $pdo->query("SELECT COUNT(*) FROM notificacoes WHERE lida = 0")->fetchColumn();
+
+// Marcar como lidas se clicar no tab
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['marcar_lidas'])) {
+    csrf_validate();
+    $pdo->exec("UPDATE notificacoes SET lida = 1 WHERE lida = 0");
+    header("Location: admin.php");
+    exit;
 }
 
 // Buscar tarefas concluídas
@@ -164,6 +237,59 @@ foreach ($todas_concluidas as $c) {
     $concluidas_por_crianca[$c['crianca_nome']][] = $c;
     $concluidas_geral[] = $c;
 }
+
+// Dados para Home (otimizado: 1 query em vez de 1+2N)
+$hoje = date('Y-m-d');
+$total_criancas = count($criancas);
+$home_criancas = $pdo->query("
+    SELECT u.id, u.nome, u.moedas,
+           COUNT(DISTINCT ts.id) as total_tarefas,
+           COUNT(DISTINCT tc.id) as feitas_hoje
+    FROM usuarios u
+    LEFT JOIN tarefas_semana ts ON ts.usuario_id = u.id
+    LEFT JOIN tarefas_cumpridas tc ON tc.tarefa_id = ts.id AND tc.data_conclusao = '$hoje'
+    WHERE u.perfil = 'crianca'
+    GROUP BY u.id
+    ORDER BY u.nome
+")->fetchAll();
+$total_moedas = array_sum(array_column($home_criancas, 'moedas'));
+$total_msg_nao_lidas_criancas = $pdo->query("SELECT COUNT(*) FROM mensagens WHERE remetente_id IS NOT NULL AND lida = 0")->fetchColumn();
+
+// Processar aprovação/recusa de sugestões de prêmios
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['aprovar_sugestao'])) {
+    csrf_validate();
+    $sugestao_id = (int)$_POST['sugestao_id'];
+    $stmt_s = $pdo->prepare("SELECT s.*, u.nome as crianca_nome FROM sugestoes_premios s JOIN usuarios u ON u.id = s.usuario_id WHERE s.id = ?");
+    $stmt_s->execute([$sugestao_id]);
+    $sug_data = $stmt_s->fetch();
+    if ($sug_data) {
+        $pdo->prepare("UPDATE sugestoes_premios SET status = 'aprovado' WHERE id = ?")->execute([$sugestao_id]);
+        $pdo->prepare("INSERT INTO mensagens (remetente_id, destinatario_id, mensagem) VALUES (NULL, ?, ?)")->execute([$sug_data['usuario_id'], "✅ Sua sugestão \"{$sug_data['nome_premio']}\" foi APROVADA! Em breve vou adicionar na loja. 🎉"]);
+        $mensagem = "✅ Sugestão aprovada! Criança notificada.";
+    }
+}
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['recusar_sugestao'])) {
+    csrf_validate();
+    $sugestao_id = (int)$_POST['sugestao_id'];
+    $stmt_s = $pdo->prepare("SELECT s.*, u.nome as crianca_nome FROM sugestoes_premios s JOIN usuarios u ON u.id = s.usuario_id WHERE s.id = ?");
+    $stmt_s->execute([$sugestao_id]);
+    $sug_data = $stmt_s->fetch();
+    if ($sug_data) {
+        $pdo->prepare("UPDATE sugestoes_premios SET status = 'recusado' WHERE id = ?")->execute([$sugestao_id]);
+        $pdo->prepare("INSERT INTO mensagens (remetente_id, destinatario_id, mensagem) VALUES (NULL, ?, ?)")->execute([$sug_data['usuario_id'], "❌ Sua sugestão \"{$sug_data['nome_premio']}\" não foi aprovada dessa vez. Mas não desista! 💪"]);
+        $mensagem = "❌ Sugestão recusada. Criança notificada.";
+    }
+}
+
+// Buscar sugestões de prêmios
+$sugestoes_premios = $pdo->query("
+    SELECT s.*, u.nome as crianca_nome
+    FROM sugestoes_premios s
+    JOIN usuarios u ON u.id = s.usuario_id
+    ORDER BY s.criada_em DESC
+    LIMIT 50
+")->fetchAll();
+$sugestoes_pendentes = $pdo->query("SELECT COUNT(*) FROM sugestoes_premios WHERE status = 'pendente'")->fetchColumn();
 ?>
 <!DOCTYPE html>
 <html lang="pt-br">
@@ -180,11 +306,15 @@ foreach ($todas_concluidas as $c) {
         <!-- ===== SIDEBAR ===== -->
         <aside class="admin-sidebar">
             <div class="sidebar-brand">
-                <span class="sidebar-icon">👩‍👦‍👧</span>
+                <img src="imagens/larissa.jpg" alt="Larissa" class="sidebar-avatar">
                 <span class="sidebar-title">Painel da Titia</span>
             </div>
             <nav class="sidebar-nav">
-                <button class="sidebar-item active" data-tab="moedas">
+                <button class="sidebar-item active" data-tab="home">
+                    <span class="si-icon">🏠</span>
+                    <span class="si-text">Home</span>
+                </button>
+                <button class="sidebar-item" data-tab="moedas">
                     <span class="si-icon">💰</span>
                     <span class="si-text">Cofrinho</span>
                 </button>
@@ -195,6 +325,31 @@ foreach ($todas_concluidas as $c) {
                 <button class="sidebar-item" data-tab="concluidas">
                     <span class="si-icon">✅</span>
                     <span class="si-text">Tarefas Concluídas</span>
+                </button>
+                <button class="sidebar-item" data-tab="extrato">
+                    <span class="si-icon">📊</span>
+                    <span class="si-text">Extrato</span>
+                </button>
+                <button class="sidebar-item" data-tab="notificacoes">
+                    <span class="si-icon">🔔</span>
+                    <span class="si-text">Notificações</span>
+                    <?php if ($notificacoes_nao_lidas > 0): ?>
+                        <span class="notif-badge"><?php echo $notificacoes_nao_lidas; ?></span>
+                    <?php endif; ?>
+                </button>
+                <button class="sidebar-item" data-tab="mensagens">
+                    <span class="si-icon">💬</span>
+                    <span class="si-text">Mensagens</span>
+                    <?php if ($total_msg_nao_lidas_criancas > 0): ?>
+                        <span class="notif-badge"><?php echo $total_msg_nao_lidas_criancas; ?></span>
+                    <?php endif; ?>
+                </button>
+                <button class="sidebar-item" data-tab="sugestoes">
+                    <span class="si-icon">💡</span>
+                    <span class="si-text">Sugestões</span>
+                    <?php if ($sugestoes_pendentes > 0): ?>
+                        <span class="notif-badge"><?php echo $sugestoes_pendentes; ?></span>
+                    <?php endif; ?>
                 </button>
                 <button class="sidebar-item" data-tab="senhas">
                     <span class="si-icon">🔑</span>
@@ -216,8 +371,57 @@ foreach ($todas_concluidas as $c) {
                 <div class="admin-message <?php echo $tipo_mensagem; ?>"><?php echo $mensagem; ?></div>
             <?php endif; ?>
 
+            <!-- ===== TAB: HOME ===== -->
+            <section class="admin-tab" id="tab-home">
+                <div class="tab-header">
+                    <h2>🏠 Visão Geral</h2>
+                    <p>Acompanhe o resumo do dia — <?php echo date('d/m/Y'); ?></p>
+                </div>
+
+                <div class="admin-home-grid">
+                    <div class="admin-home-card">
+                        <div class="ahc-icon">👶</div>
+                        <div class="ahc-valor"><?php echo $total_criancas; ?></div>
+                        <div class="ahc-label">Crianças</div>
+                    </div>
+                    <div class="admin-home-card">
+                        <div class="ahc-icon">💰</div>
+                        <div class="ahc-valor"><?php echo $total_moedas; ?></div>
+                        <div class="ahc-label">Total de Moedas</div>
+                    </div>
+                    <div class="admin-home-card">
+                        <div class="ahc-icon">💬</div>
+                        <div class="ahc-valor"><?php echo $total_msg_nao_lidas_criancas; ?></div>
+                        <div class="ahc-label">Msg Não Lidas</div>
+                    </div>
+                    <div class="admin-home-card">
+                        <div class="ahc-icon">🔔</div>
+                        <div class="ahc-valor"><?php echo $notificacoes_nao_lidas; ?></div>
+                        <div class="ahc-label">Notificações</div>
+                    </div>
+                </div>
+
+                <div class="section-title">👶 Resumo das Crianças</div>
+                <div class="admin-home-table">
+                    <div class="aht-header">
+                        <span>Nome</span>
+                        <span>💰 Moedas</span>
+                        <span>📋 Tarefas</span>
+                        <span>✅ Feitas Hoje</span>
+                    </div>
+                    <?php foreach ($home_criancas as $hc): ?>
+                        <div class="aht-row card-<?php echo strtolower($hc['nome']); ?>">
+                            <span class="aht-nome"><?php echo htmlspecialchars($hc['nome']); ?></span>
+                            <span><?php echo $hc['moedas']; ?></span>
+                            <span><?php echo $hc['total_tarefas']; ?></span>
+                            <span><?php echo $hc['feitas_hoje']; ?></span>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            </section>
+
             <!-- ===== TAB: MOEDAS ===== -->
-            <section class="admin-tab" id="tab-moedas">
+            <section class="admin-tab" id="tab-moedas" style="display:none">
                 <div class="tab-header">
                     <h2>💰 Cofrinho das Crianças</h2>
                     <p>Acompanhe o progresso de cada uma</p>
@@ -225,25 +429,31 @@ foreach ($todas_concluidas as $c) {
 
                 <div class="tab-moedas-grid">
                     <?php foreach ($criancas as $crianca):
-                        $meta = 150;
-                        $porcentagem = min(($crianca['moedas'] / $meta) * 100, 100);
+                        $moedas_c = (int)$crianca['moedas'];
+                        $meta = meta_atual($moedas_c);
+                        $prox_meta = 150;
+                        foreach ($metas_moedas as $m) {
+                            if ($moedas_c < $m) { $prox_meta = $m; break; }
+                        }
+                        $completou = $moedas_c >= $meta && $meta == $prox_meta;
+                        $porcentagem = min(($moedas_c / $prox_meta) * 100, 100);
                         $card_class = 'card-' . strtolower($crianca['nome']);
-                        $completou = $crianca['moedas'] >= $meta;
                     ?>
                         <div class="moeda-card <?php echo $card_class; ?>">
                             <div class="moeda-card-top">
                                 <span class="moeda-nome"><?php echo htmlspecialchars($crianca['nome']); ?></span>
-                                <span class="moeda-valor"><?php echo $crianca['moedas']; ?></span>
+                                <span class="moeda-valor"><?php echo $moedas_c; ?></span>
                             </div>
                             <div class="moeda-label">moedas</div>
                             <div class="moeda-progress-bg">
                                 <div class="moeda-progress-fill" style="width: <?php echo $porcentagem; ?>%;"></div>
                             </div>
                             <div class="moeda-meta">
-                                <?php if ($completou): ?>
-                                    <span class="moeda-completou">🎉 Meta atingida!</span>
+                                Meta: <strong><?php echo $prox_meta; ?></strong>
+                                <?php if ($moedas_c >= $prox_meta): ?>
+                                    • <span class="moeda-completou">🏆 Atingida!</span>
                                 <?php else: ?>
-                                    Faltam <?php echo $meta - $crianca['moedas']; ?> para <?php echo $meta; ?>
+                                    • faltam <?php echo $prox_meta - $moedas_c; ?>
                                 <?php endif; ?>
                             </div>
 
@@ -274,10 +484,10 @@ foreach ($todas_concluidas as $c) {
                                 </form>
 
                                 <!-- Resgatar Prêmio -->
-                                <?php if ($completou): ?>
-                                    <form method="POST" class="moeda-acao-form" onsubmit="return confirm('Resgatar o prêmio de 150 moedas para <?php echo htmlspecialchars($crianca['nome']); ?>? O saldo será zerado.')">
+                                <?php if ($moedas_c >= $meta): ?>
+                                    <form method="POST" class="moeda-acao-form" onsubmit="return confirm('Resgatar o prêmio de <?php echo $meta; ?> moedas para <?php echo htmlspecialchars($crianca['nome']); ?>?')">
                                         <input type="hidden" name="crianca_id" value="<?php echo $crianca['id']; ?>">
-                                        <button type="submit" name="resgatar_premio" class="btn-acao premio">🎁 Resgatar Prêmio</button>
+                                        <button type="submit" name="resgatar_premio" class="btn-acao premio">🎁 Resgatar (<?php echo $meta; ?>)</button>
                                     </form>
                                 <?php endif; ?>
                             </div>
@@ -321,6 +531,10 @@ foreach ($todas_concluidas as $c) {
                             <label for="descricao">Descrição da Tarefa</label>
                             <input type="text" name="descricao" id="descricao" placeholder="Ex: Arrumar a cama" required maxlength="255">
                         </div>
+                        <div class="form-group">
+                            <label for="valor">Valor em Moedas</label>
+                            <input type="number" name="valor" id="valor" value="1" min="1" max="99" style="width:100%;padding:11px 14px;border:1px solid var(--sangue-fundo);border-radius:var(--admin-radius-sm);font-size:14px;font-family:var(--font);color:var(--neon-light);background:rgba(5,7,8,0.6);outline:none;box-sizing:border-box">
+                        </div>
                         <button type="submit" name="adicionar_tarefa" class="btn-add">Adicionar Tarefa</button>
                     </form>
                 </div>
@@ -352,6 +566,7 @@ foreach ($todas_concluidas as $c) {
                                 <div class="admin-tarefa-item" data-id="<?php echo $t['id']; ?>">
                                     <div class="tarefa-view">
                                         <span class="tarefa-texto"><?php echo htmlspecialchars($t['descricao']); ?></span>
+                                        <span class="tarefa-valor-badge">+<?php echo (int)($t['valor'] ?? 1); ?> 💰</span>
                                         <div class="tarefa-actions">
                                             <button class="btn-edit" onclick="editTask(<?php echo $t['id']; ?>)" title="Editar">✏️</button>
                                             <form method="POST" style="margin:0" onsubmit="return confirm('Remover esta tarefa?')">
@@ -363,6 +578,7 @@ foreach ($todas_concluidas as $c) {
                                     <form method="POST" class="tarefa-edit-form" style="display:none">
                                         <input type="hidden" name="tarefa_id" value="<?php echo $t['id']; ?>">
                                         <input type="text" name="descricao" value="<?php echo htmlspecialchars($t['descricao']); ?>" maxlength="255" autofocus>
+                                        <input type="number" name="valor" value="<?php echo (int)($t['valor'] ?? 1); ?>" min="1" max="99" style="width:70px;padding:8px 10px;border:1px solid var(--sangue-fundo);border-radius:var(--admin-radius-sm);font-size:13px;font-family:var(--font);color:var(--neon-light);background:rgba(5,7,8,0.6);outline:none;box-sizing:border-box" title="Valor em moedas">
                                         <button type="submit" name="editar_tarefa" class="btn-save" title="Salvar">💾</button>
                                         <button type="button" class="btn-cancel" onclick="cancelEdit(<?php echo $t['id']; ?>)" title="Cancelar">✕</button>
                                     </form>
@@ -415,6 +631,296 @@ foreach ($todas_concluidas as $c) {
                                     <span class="concluida-info"><?php echo $nome_dia; ?> • <?php echo $data_br; ?></span>
                                 </div>
                             <?php endforeach; ?>
+                        </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            </section>
+
+            <!-- ===== TAB: EXTRATO ===== -->
+            <section class="admin-tab" id="tab-extrato" style="display:none">
+                <div class="tab-header">
+                    <h2>📊 Extrato de Moedas</h2>
+                    <p>Histórico completo de movimentações</p>
+                </div>
+
+                <div class="extrato-card">
+                    <?php foreach ($criancas as $c): 
+                        $moedas = (int)$c['moedas'];
+                        $proxima_meta = 150;
+                        foreach ($metas_moedas as $m) {
+                            if ($moedas < $m) { $proxima_meta = $m; break; }
+                        }
+                        $progresso = min(($moedas / $proxima_meta) * 100, 100);
+                        $falta = max(0, $proxima_meta - $moedas);
+                    ?>
+                        <div class="extrato-card-item">
+                            <div class="extrato-card-nome"><?php echo htmlspecialchars($c['nome']); ?></div>
+                            <div class="extrato-card-moedas">
+                                <span class="extrato-card-valor"><?php echo $moedas; ?></span>
+                                <span class="extrato-card-label">moedas</span>
+                            </div>
+                            <div class="extrato-card-meta">
+                                Meta: <strong><?php echo $proxima_meta; ?></strong>
+                                <?php if ($falta > 0): ?>
+                                    • faltam <strong class="extrato-card-falta"><?php echo $falta; ?></strong>
+                                <?php else: ?>
+                                    • 🏆 meta atingida!
+                                <?php endif; ?>
+                            </div>
+                            <div class="extrato-card-bar">
+                                <div class="extrato-card-bar-fill" style="width:<?php echo $progresso; ?>%"></div>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+
+                <?php
+                $stmt_extrato = $pdo->query("
+                    SELECT h.*, u.nome as crianca_nome
+                    FROM historico_moedas h
+                    JOIN usuarios u ON u.id = h.usuario_id
+                    ORDER BY h.criada_em DESC
+                    LIMIT 50
+                ");
+                $extrato_geral = $stmt_extrato->fetchAll();
+                ?>
+
+                <?php if (count($extrato_geral) === 0): ?>
+                    <div class="empty-state">
+                        <span class="empty-icon">📭</span>
+                        <p>Nenhuma movimentação ainda.</p>
+                    </div>
+                <?php else: ?>
+                    <div class="extrato-header">
+                        Últimas <?php echo count($extrato_geral); ?> movimentações
+                    </div>
+                    <div class="notif-list">
+                        <?php foreach ($extrato_geral as $e): ?>
+                            <div class="notif-item">
+                                <div class="notif-icon <?php echo $e['tipo'] === 'ganhou' ? 'notif-icon-ganhou' : ($e['tipo'] === 'sorteio' ? 'notif-icon-sorteio' : 'notif-icon-perdeu'); ?>">
+                                    <?php echo $e['tipo'] === 'ganhou' ? '💰' : ($e['tipo'] === 'sorteio' ? '🎰' : '💸'); ?>
+                                </div>
+                                <div class="notif-content">
+                                    <span class="notif-msg">
+                                        <strong><?php echo htmlspecialchars($e['crianca_nome']); ?></strong> — <?php echo htmlspecialchars($e['descricao']); ?>
+                                    </span>
+                                    <span class="notif-time"><?php echo date('d/m/Y H:i', strtotime($e['criada_em'])); ?></span>
+                                </div>
+                                <span class="extrato-item-valor <?php echo $e['tipo'] === 'ganhou' ? 'extrato-item-ganhou' : 'extrato-item-perdeu'; ?>">
+                                    <?php echo $e['tipo'] === 'ganhou' ? '+' : '-'; ?><?php echo $e['quantia']; ?>
+                                </span>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                <?php endif; ?>
+            </section>
+
+            <!-- ===== TAB: NOTIFICAÇÕES ===== -->
+            <section class="admin-tab" id="tab-notificacoes" style="display:none">
+                <div class="tab-header">
+                    <h2>🔔 Notificações</h2>
+                    <p>Avisos de tarefas concluídas</p>
+                </div>
+
+                <?php if (count($notificacoes) === 0): ?>
+                    <div class="empty-state">
+                        <span class="empty-icon">📭</span>
+                        <p>Nenhuma notificação ainda.</p>
+                    </div>
+                <?php else: ?>
+                    <div class="notif-header">
+                        <span class="notif-info">
+                            <?php echo count($notificacoes); ?> notificaç<?php echo count($notificacoes) > 1 ? 'ões' : 'ão'; ?>
+                            <?php if ($notificacoes_nao_lidas > 0): ?>
+                                • <strong class="notif-info-destaque"><?php echo $notificacoes_nao_lidas; ?> não lida<?php echo $notificacoes_nao_lidas > 1 ? 's' : ''; ?></strong>
+                            <?php endif; ?>
+                        </span>
+                        <?php if ($notificacoes_nao_lidas > 0): ?>
+                            <form method="POST">
+                                <button type="submit" name="marcar_lidas" class="btn-add btn-marcar-lidas">✅ Marcar todas como lidas</button>
+                            </form>
+                        <?php endif; ?>
+                    </div>
+                    <div class="notif-list">
+                        <?php foreach ($notificacoes as $n): ?>
+                            <div class="notif-item <?php echo $n['lida'] ? 'notif-lida' : 'notif-nao-lida'; ?>">
+                                <div class="notif-icon"><?php echo $n['lida'] ? '✅' : '🎉'; ?></div>
+                                <div class="notif-content">
+                                    <span class="notif-msg"><?php echo htmlspecialchars($n['mensagem']); ?></span>
+                                    <span class="notif-time"><?php echo date('d/m/Y H:i', strtotime($n['criada_em'])); ?></span>
+                                </div>
+                                <?php if (!$n['lida']): ?>
+                                    <span class="notif-badge-novo">NOVA</span>
+                                <?php endif; ?>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                <?php endif; ?>
+            </section>
+
+            <!-- ===== TAB: MENSAGENS ===== -->
+            <section class="admin-tab" id="tab-mensagens" style="display:none">
+                <div class="tab-header">
+                    <h2>💬 Conversa com as Crianças</h2>
+                    <p>Envie recados e veja o que as crianças respondem</p>
+                </div>
+
+                <div class="admin-form-card">
+                    <h3>✉️ Enviar Recado</h3>
+                    <form method="POST" class="admin-task-form">
+                        <div class="form-group">
+                            <label for="crianca_id_msg">Para quem?</label>
+                            <select name="crianca_id_msg" id="crianca_id_msg" required>
+                                <option value="">Selecione...</option>
+                                <?php foreach ($criancas as $crianca): ?>
+                                    <option value="<?php echo $crianca['id']; ?>"><?php echo htmlspecialchars($crianca['nome']); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="texto_mensagem">Mensagem</label>
+                            <textarea name="texto_mensagem" id="texto_mensagem" rows="3" placeholder="Ex: Parabéns pela tarefa de hoje! 🎉" required maxlength="500" class="msg-textarea"></textarea>
+                        </div>
+                        <button type="submit" name="enviar_mensagem" class="btn-add">💬 Enviar Recado</button>
+                    </form>
+                </div>
+
+                <!-- Mensagens das crianças -->
+                <?php
+                $stmt_msg_criancas = $pdo->query("
+                    SELECT m.id, m.mensagem, m.criada_em, m.lida, u.nome as crianca_nome
+                    FROM mensagens m
+                    JOIN usuarios u ON u.id = m.remetente_id
+                    WHERE m.remetente_id IS NOT NULL AND m.destinatario_id IS NULL
+                    ORDER BY m.criada_em DESC
+                    LIMIT 30
+                ");
+                $msg_criancas = $stmt_msg_criancas->fetchAll();
+                $msg_criancas_nao_lidas = $pdo->query("SELECT COUNT(*) FROM mensagens WHERE remetente_id IS NOT NULL AND destinatario_id IS NULL AND lida = 0")->fetchColumn();
+                ?>
+                <div class="admin-form-card">
+                    <h3>📨 Respostas das Crianças <?php if ($msg_criancas_nao_lidas > 0): ?><span class="badge-msg"><?php echo $msg_criancas_nao_lidas; ?> nova(s)</span><?php endif; ?></h3>
+                    <?php if ($msg_criancas_nao_lidas > 0): ?>
+                        <form method="POST" style="margin-bottom:12px">
+                            <button type="submit" name="marcar_msg_crianca_lidas" class="btn-add" style="background:#E25296">✅ Marcar todas como lidas</button>
+                        </form>
+                    <?php endif; ?>
+                    <?php if (count($msg_criancas) === 0): ?>
+                        <p style="color:var(--neon-light);text-align:center;padding:12px 0">Nenhuma resposta ainda.</p>
+                    <?php else: ?>
+                        <?php foreach ($msg_criancas as $msg): ?>
+                            <div class="msg-card <?php echo !$msg['lida'] ? 'msg-destaque' : ''; ?>">
+                                <div class="msg-card-top">
+                                    <span class="msg-card-para">👤 <strong><?php echo htmlspecialchars($msg['crianca_nome']); ?></strong> respondeu</span>
+                                    <span class="msg-card-status <?php echo $msg['lida'] ? 'lida' : 'nao-lida'; ?>">
+                                        <?php echo $msg['lida'] ? '✅ Lida' : '🕐 Nova'; ?>
+                                    </span>
+                                </div>
+                                <div class="msg-card-texto"><?php echo nl2br(htmlspecialchars($msg['mensagem'])); ?></div>
+                                <div class="msg-card-data"><?php echo date('d/m/Y H:i', strtotime($msg['criada_em'])); ?></div>
+                            </div>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </div>
+
+                <!-- Histórico de mensagens enviadas pela TIA -->
+                <?php
+                $stmt_msg = $pdo->query("
+                    SELECT m.id, m.mensagem, m.criada_em, m.lida, u.nome as crianca_nome
+                    FROM mensagens m
+                    JOIN usuarios u ON u.id = m.destinatario_id
+                    WHERE m.remetente_id IS NULL
+                    ORDER BY m.criada_em DESC
+                    LIMIT 30
+                ");
+                $mensagens_enviadas = $stmt_msg->fetchAll();
+                ?>
+                <div class="admin-form-card">
+                    <h3>📨 Últimas Mensagens Enviadas</h3>
+                    <?php if (count($mensagens_enviadas) === 0): ?>
+                        <p style="color:var(--neon-light);text-align:center;padding:12px 0">Nenhuma mensagem enviada ainda.</p>
+                    <?php else: ?>
+                        <?php foreach ($mensagens_enviadas as $msg): ?>
+                            <div class="msg-card">
+                                <div class="msg-card-top">
+                                    <span class="msg-card-para">📬 Para <strong><?php echo htmlspecialchars($msg['crianca_nome']); ?></strong></span>
+                                    <span class="msg-card-status <?php echo $msg['lida'] ? 'lida' : 'nao-lida'; ?>">
+                                        <?php echo $msg['lida'] ? '✅ Lida' : '🕐 Pendente'; ?>
+                                    </span>
+                                </div>
+                                <div class="msg-card-texto"><?php echo nl2br(htmlspecialchars($msg['mensagem'])); ?></div>
+                                <div class="msg-card-data"><?php echo date('d/m/Y H:i', strtotime($msg['criada_em'])); ?></div>
+                            </div>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </div>
+            </section>
+
+            <!-- ===== TAB: SUGESTÕES ===== -->
+            <section class="admin-tab" id="tab-sugestoes" style="display:none">
+                <div class="tab-header">
+                    <h2>💡 Sugestões de Prêmios</h2>
+                    <p>Veja o que as crianças estão pedindo e autorize ou recuse</p>
+                </div>
+
+                <?php if (count($sugestoes_premios) === 0): ?>
+                    <div class="empty-state">
+                        <span class="empty-icon">💭</span>
+                        <p>Nenhuma sugestão ainda.</p>
+                    </div>
+                <?php else: ?>
+                    <div class="notif-header" style="margin-bottom:16px">
+                        <span class="notif-info">
+                            <?php echo count($sugestoes_premios); ?> sugestão(ões)
+                            <?php if ($sugestoes_pendentes > 0): ?>
+                                • <strong class="notif-info-destaque"><?php echo $sugestoes_pendentes; ?> pendente(s)</strong>
+                            <?php endif; ?>
+                        </span>
+                    </div>
+
+                    <?php foreach ($sugestoes_premios as $s):
+                        $crianca_lower = strtolower($s['crianca_nome']);
+                        $card_style = "background:rgba(5,7,8,0.6);border:1px solid rgba(255,255,255,0.06);border-radius:14px;padding:16px;margin-bottom:12px";
+                        if ($s['status'] === 'pendente') $card_style .= ";border-color:#FBBF24;background:rgba(251,191,36,0.05)";
+                        elseif ($s['status'] === 'aprovado') $card_style .= ";border-color:#22c55e;background:rgba(34,197,94,0.05)";
+                        elseif ($s['status'] === 'recusado') $card_style .= ";border-color:#ef4444;background:rgba(239,68,68,0.05)";
+                    ?>
+                        <div style="<?php echo $card_style; ?>">
+                            <div style="display:flex;align-items:flex-start;gap:14px">
+                                <span style="font-size:24px"><?php echo $s['status'] === 'aprovado' ? '✅' : ($s['status'] === 'recusado' ? '❌' : '⏳'); ?></span>
+                                <div style="flex:1">
+                                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                                        <strong style="font-size:16px;color:#fff"><?php echo htmlspecialchars($s['nome_premio']); ?></strong>
+                                        <span style="font-size:12px;padding:2px 10px;border-radius:20px;font-weight:600;
+                                            <?php
+                                            if ($s['status'] === 'aprovado') echo 'background:#22c55e22;color:#22c55e';
+                                            elseif ($s['status'] === 'recusado') echo 'background:#ef444422;color:#ef4444';
+                                            else echo 'background:#FBBF2422;color:#FBBF24';
+                                            ?>">
+                                            <?php echo $s['status'] === 'aprovado' ? 'Aprovado' : ($s['status'] === 'recusado' ? 'Recusado' : 'Pendente'); ?>
+                                        </span>
+                                    </div>
+                                    <?php if (!empty($s['descricao'])): ?>
+                                        <p style="margin:6px 0 0;font-size:13px;color:#94a3b8"><?php echo nl2br(htmlspecialchars($s['descricao'])); ?></p>
+                                    <?php endif; ?>
+                                    <div style="margin-top:8px;font-size:12px;color:#64748b">
+                                        👤 <?php echo htmlspecialchars($s['crianca_nome']); ?> •
+                                        📅 <?php echo date('d/m/Y H:i', strtotime($s['criada_em'])); ?>
+                                    </div>
+                                </div>
+                                <?php if ($s['status'] === 'pendente'): ?>
+                                    <div style="display:flex;gap:6px;flex-shrink:0">
+                                        <form method="POST" style="margin:0" onsubmit="return confirm('Aprovar esta sugestão?')">
+                                            <input type="hidden" name="sugestao_id" value="<?php echo $s['id']; ?>">
+                                            <button type="submit" name="aprovar_sugestao" class="btn-acao bonus" style="padding:8px 16px;border:none;border-radius:8px;cursor:pointer;font-size:13px;background:#22c55e;color:#fff">✅ Aprovar</button>
+                                        </form>
+                                        <form method="POST" style="margin:0" onsubmit="return confirm('Recusar esta sugestão?')">
+                                            <input type="hidden" name="sugestao_id" value="<?php echo $s['id']; ?>">
+                                            <button type="submit" name="recusar_sugestao" class="btn-acao multa" style="padding:8px 16px;border:none;border-radius:8px;cursor:pointer;font-size:13px;background:#ef4444;color:#fff">❌ Recusar</button>
+                                        </form>
+                                    </div>
+                                <?php endif; ?>
+                            </div>
                         </div>
                     <?php endforeach; ?>
                 <?php endif; ?>
@@ -509,15 +1015,38 @@ foreach ($todas_concluidas as $c) {
         adminOverlay.addEventListener('click', closeAdminSidebar);
 
         // Tab switching
+        function ativarAbaAdmin(tabId) {
+            document.querySelectorAll('.sidebar-item').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.admin-tab').forEach(t => t.style.display = 'none');
+            const btn = document.querySelector(`.sidebar-item[data-tab="${tabId}"]`);
+            if (btn) btn.classList.add('active');
+            const section = document.getElementById('tab-' + tabId);
+            if (section) section.style.display = 'block';
+            history.replaceState(null, '', '#tab-' + tabId);
+        }
+
         document.querySelectorAll('.sidebar-item').forEach(btn => {
             btn.addEventListener('click', function() { closeAdminSidebar(); });
             btn.addEventListener('click', function() {
-                document.querySelectorAll('.sidebar-item').forEach(b => b.classList.remove('active'));
-                this.classList.add('active');
-                const tab = this.dataset.tab;
-                document.querySelectorAll('.admin-tab').forEach(t => t.style.display = 'none');
-                document.getElementById('tab-' + tab).style.display = 'block';
+                ativarAbaAdmin(this.dataset.tab);
             });
+        });
+
+        // Restaurar aba do hash
+        (function() {
+            const hash = location.hash.replace('#tab-', '');
+            if (hash && document.getElementById('tab-' + hash)) {
+                ativarAbaAdmin(hash);
+            } else {
+                ativarAbaAdmin('home');
+            }
+        })();
+
+        window.addEventListener('hashchange', function() {
+            const hash = location.hash.replace('#tab-', '');
+            if (hash && document.getElementById('tab-' + hash)) {
+                ativarAbaAdmin(hash);
+            }
         });
 
         // Edit task
@@ -536,6 +1065,12 @@ foreach ($todas_concluidas as $c) {
             item.querySelector('.tarefa-edit-form').style.display = 'none';
         }
     </script>
-
+    <script>
+        var csrfInput = document.createElement('input');
+        csrfInput.type = 'hidden';
+        csrfInput.name = 'csrf_token';
+        csrfInput.value = '<?php echo csrf_token(); ?>';
+        document.querySelectorAll('form[method="POST"]').forEach(function(f) { f.appendChild(csrfInput.cloneNode(true)); });
+    </script>
 </body>
 </html>

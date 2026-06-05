@@ -1,5 +1,9 @@
 <?php
-// testar.php
+@session_start();
+if (!isset($_SESSION['usuario_id']) || $_SESSION['usuario_perfil'] !== 'admin') {
+    header('Location: index.php');
+    exit;
+}
 require_once 'conexao.php';
 
 $usuario_teste = 'admin';

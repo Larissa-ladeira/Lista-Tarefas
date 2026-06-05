@@ -19,7 +19,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt->execute([$username]);
         $usuario = $stmt->fetch();
 
-        // Verifica se o usuário existe e se a senha está correta
+        // VALIDAÇÃO CORRETA COM HASH (O reset.php gerou as senhas assim!)
         if ($usuario && password_verify($senha, $usuario['senha'])) {
             // Salva os dados na sessão do navegador
             $_SESSION['usuario_id'] = $usuario['id'];

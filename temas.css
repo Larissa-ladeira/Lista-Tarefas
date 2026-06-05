@@ -326,3 +326,166 @@
   background-repeat: no-repeat;
   background-attachment: fixed;
 }
+
+/* ============================================================
+   TEMA 3 — NICOLE (Hello Kitty / Pink Cute)
+   Estética fofa, rosa claro com corações e brilho
+   ============================================================ */
+.tema-nicole {
+  --hk-bg: #fff0f5;
+  --hk-surface: #ffe4ec;
+  --hk-card: rgba(255, 240, 245, 0.88);
+  --hk-border: rgba(255, 105, 180, 0.08);
+  --hk-pink: #ff69b4;
+  --hk-pink-dark: #ff1493;
+  --hk-pink-soft: #ffb6c1;
+  --hk-gold: #fbbf24;
+  --hk-text: #4a1a30;
+  --hk-text-muted: #b88aa0;
+  --hk-danger: #d63384;
+  --font-heading: 'Segoe UI', system-ui, sans-serif;
+  --font-body: 'Segoe UI', system-ui, sans-serif;
+}
+
+.tema-nicole {
+  font-family: var(--font-body);
+  background: linear-gradient(135deg, #fff0f5 0%, #ffe4ec 30%, #fce4ec 70%, #fff0f5 100%);
+  min-height: 100vh;
+  color: var(--hk-text);
+}
+
+.tema-nicole .container-painel {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 36px 32px;
+}
+
+.tema-nicole .titulo-usuario {
+  font-family: var(--font-heading);
+  font-size: 28px;
+  font-weight: 800;
+  background: linear-gradient(135deg, var(--hk-pink-dark), var(--hk-pink));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: 1px;
+  margin-bottom: 4px;
+}
+
+.tema-nicole .cofrinho-moedas {
+  background: linear-gradient(135deg, #ffb6c1 0%, #ff69b4 50%, #ff1493 100%);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 16px;
+  padding: 28px 24px;
+  margin-bottom: 24px;
+  text-align: center;
+  box-shadow: 0 8px 32px rgba(255, 105, 180, 0.15);
+}
+
+.tema-nicole .cofrinho-moedas .saldo {
+  font-family: var(--font-heading);
+  font-size: 52px;
+  font-weight: 800;
+  background: linear-gradient(135deg, var(--hk-gold) 0%, #e0b020 50%, var(--hk-gold) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  filter: drop-shadow(0 0 20px rgba(251, 191, 36, 0.2));
+}
+
+.tema-nicole .cofrinho-moedas .barra-progresso {
+  height: 8px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  margin-top: 12px;
+  overflow: hidden;
+}
+
+.tema-nicole .cofrinho-moedas .barra-progresso .fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ff1493, #ffb6c1);
+  border-radius: 4px;
+  box-shadow: 0 0 12px rgba(255, 20, 147, 0.4);
+  transition: width 0.6s ease;
+}
+
+.tema-nicole .lista-tarefas {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tema-nicole .item-tarefa {
+  background: var(--hk-card);
+  border: 1px solid var(--hk-border);
+  border-left: 3px solid rgba(255, 105, 180, 0.2);
+  border-radius: 12px;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  backdrop-filter: blur(12px);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.tema-nicole .item-tarefa:hover {
+  border-left-color: rgba(255, 20, 147, 0.4);
+  box-shadow: 0 4px 20px rgba(255, 105, 180, 0.06);
+  transform: translateY(-1px);
+}
+
+.tema-nicole .item-tarefa .descricao {
+  font-size: 15px;
+  color: var(--hk-text);
+  font-weight: 500;
+}
+
+.tema-nicole .item-tarefa .descricao.feita {
+  color: var(--hk-text-muted);
+  text-decoration: line-through;
+}
+
+.tema-nicole .btn-concluir {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 14px;
+  padding: 10px 22px;
+  border: none;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--hk-pink), var(--hk-pink-dark));
+  color: white;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(255, 105, 180, 0.25);
+  transition: all 0.25s ease;
+  letter-spacing: 0.5px;
+}
+
+.tema-nicole .btn-concluir:hover {
+  box-shadow: 0 6px 24px rgba(255, 105, 180, 0.4);
+  transform: translateY(-2px);
+}
+
+.tema-nicole .btn-concluir:active {
+  transform: translateY(0);
+}
+
+.tema-nicole .btn-concluir:disabled {
+  background: rgba(255, 105, 180, 0.08);
+  color: var(--hk-text-muted);
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+/* Heart particles background */
+.tema-nicole {
+  background-image:
+    radial-gradient(3px 3px at 12% 20%, rgba(255, 105, 180, 0.15), transparent),
+    radial-gradient(2px 2px at 38% 52%, rgba(255, 182, 193, 0.12), transparent),
+    radial-gradient(3px 3px at 58% 8%, rgba(255, 20, 147, 0.1), transparent),
+    radial-gradient(2px 2px at 78% 68%, rgba(255, 105, 180, 0.12), transparent),
+    radial-gradient(3px 3px at 90% 35%, rgba(255, 182, 193, 0.1), transparent),
+    radial-gradient(2px 2px at 22% 82%, rgba(255, 105, 180, 0.12), transparent);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
