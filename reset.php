@@ -14,7 +14,9 @@ try {
       username VARCHAR(50) UNIQUE,
       senha VARCHAR(255),
       perfil ENUM('admin','crianca'),
-      moedas INT DEFAULT 0
+      moedas INT DEFAULT 0,
+      auth_provider ENUM('local','google') DEFAULT 'local',
+      google_id VARCHAR(255) DEFAULT NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
 
     $pdo->exec("CREATE TABLE IF NOT EXISTS tarefas_semana (
@@ -23,6 +25,7 @@ try {
       descricao VARCHAR(255),
       valor INT DEFAULT 1,
       dia_semana INT,
+      status ENUM('aprovado','pendente','recusado') DEFAULT 'aprovado',
       FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
 
@@ -96,6 +99,19 @@ try {
       FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
 
+    $pdo->exec("CREATE TABLE IF NOT EXISTS remember_tokens (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      usuario_id INT NOT NULL,
+      token VARCHAR(64) NOT NULL UNIQUE,
+      expira_em DATETIME NOT NULL,
+      criado_em DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
+
+    // Migração: adiciona colunas novas se não existirem
+    try { $pdo->exec("ALTER TABLE usuarios ADD COLUMN auth_provider ENUM('local','google') DEFAULT 'local'"); } catch (\PDOException $e) {}
+    try { $pdo->exec("ALTER TABLE usuarios ADD COLUMN google_id VARCHAR(255) DEFAULT NULL"); } catch (\PDOException $e) {}
+
     // 2. Limpa os dados antigos com segurança
     $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
     $pdo->exec("TRUNCATE TABLE premios_resgatados");
@@ -104,6 +120,7 @@ try {
     $pdo->exec("TRUNCATE TABLE notificacoes");
     $pdo->exec("TRUNCATE TABLE mensagens");
     $pdo->exec("TRUNCATE TABLE historico_moedas");
+    $pdo->exec("TRUNCATE TABLE remember_tokens");
     $pdo->exec("TRUNCATE TABLE sugestoes_premios");
     $pdo->exec("TRUNCATE TABLE usuarios");
     $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");

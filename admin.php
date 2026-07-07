@@ -1,4 +1,5 @@
 <?php
+session_set_cookie_params(['lifetime' => 0, 'path' => '/']);
 @session_start();
 require_once 'conexao.php';
 
@@ -17,7 +18,8 @@ function csrf_validate() {
     }
 }
 
-$mensagem = '';
+$admin_id = (int)$_SESSION['usuario_id'];
+$mensagem = $_GET['msg'] ?? '';
 $tipo_mensagem = 'sucesso';
 
 $dias_nomes = [
@@ -36,8 +38,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['adicionar_tarefa'])) 
     $valor = (int)$_POST['valor'];
     if ($valor < 1) $valor = 1;
     if (!empty($descricao) && $crianca_id > 0 && $dia_semana >= 0 && $dia_semana <= 6) {
-        $pdo->prepare("INSERT INTO tarefas_semana (usuario_id, descricao, valor, dia_semana) VALUES (?, ?, ?, ?)")->execute([$crianca_id, $descricao, $valor, $dia_semana]);
-        $mensagem = "Tarefa adicionada com sucesso!";
+        if (!verificar_crianca($pdo, $crianca_id, $admin_id)) {
+            $mensagem = "Criança não encontrada."; $tipo_mensagem = 'erro';
+        } else {
+            $pdo->prepare("INSERT INTO tarefas_semana (usuario_id, descricao, valor, dia_semana) VALUES (?, ?, ?, ?)")->execute([$crianca_id, $descricao, $valor, $dia_semana]);
+            $mensagem = "Tarefa adicionada com sucesso!";
+        }
     } else { $mensagem = "Preencha todos os campos."; $tipo_mensagem = 'erro'; }
 }
 
@@ -45,9 +51,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['adicionar_tarefa'])) 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['deletar_tarefa'])) {
     csrf_validate();
     $tarefa_id = (int)$_POST['tarefa_id'];
-    $pdo->prepare("DELETE FROM tarefas_cumpridas WHERE tarefa_id = ?")->execute([$tarefa_id]);
-    $pdo->prepare("DELETE FROM tarefas_semana WHERE id = ?")->execute([$tarefa_id]);
-    $mensagem = "Tarefa removida.";
+    $verif = $pdo->prepare("SELECT t.id FROM tarefas_semana t JOIN usuarios u ON u.id = t.usuario_id WHERE t.id = ? AND u.criado_por = ?");
+    $verif->execute([$tarefa_id, $admin_id]);
+    if ($verif->fetch()) {
+        $pdo->prepare("DELETE FROM tarefas_cumpridas WHERE tarefa_id = ?")->execute([$tarefa_id]);
+        $pdo->prepare("DELETE FROM tarefas_semana WHERE id = ?")->execute([$tarefa_id]);
+        $mensagem = "Tarefa removida.";
+    } else { $mensagem = "Tarefa não encontrada."; $tipo_mensagem = 'erro'; }
 }
 
 // Editar tarefa
@@ -56,7 +66,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['editar_tarefa'])) {
     $tarefa_id = (int)$_POST['tarefa_id'];
     $nova_descricao = trim($_POST['descricao']);
     $novo_valor = isset($_POST['valor']) ? (int)$_POST['valor'] : 0;
-    if (!empty($nova_descricao)) {
+    $verif = $pdo->prepare("SELECT t.id FROM tarefas_semana t JOIN usuarios u ON u.id = t.usuario_id WHERE t.id = ? AND u.criado_por = ?");
+    $verif->execute([$tarefa_id, $admin_id]);
+    if (!$verif->fetch()) {
+        $mensagem = "Tarefa não encontrada."; $tipo_mensagem = 'erro';
+    } elseif (!empty($nova_descricao)) {
         if ($novo_valor > 0) {
             $pdo->prepare("UPDATE tarefas_semana SET descricao = ?, valor = ? WHERE id = ?")->execute([$nova_descricao, $novo_valor, $tarefa_id]);
         } else {
@@ -72,9 +86,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['dar_bonus'])) {
     $crianca_id = (int)$_POST['crianca_id'];
     $quantia = (int)$_POST['quantia'];
     if ($crianca_id > 0 && $quantia > 0) {
-        $pdo->prepare("UPDATE usuarios SET moedas = moedas + ? WHERE id = ?")->execute([$quantia, $crianca_id]);
-        $pdo->prepare("INSERT INTO historico_moedas (usuario_id, quantia, tipo, descricao) VALUES (?, ?, 'ganhou', 'Bônus da TIA')")->execute([$crianca_id, $quantia]);
-        $mensagem = "Bônus de +$quantia moedas aplicado!";
+        if (!verificar_crianca($pdo, $crianca_id, $admin_id)) {
+            $mensagem = "Criança não encontrada."; $tipo_mensagem = 'erro';
+        } else {
+            $pdo->prepare("UPDATE usuarios SET moedas = moedas + ? WHERE id = ?")->execute([$quantia, $crianca_id]);
+            $pdo->prepare("INSERT INTO historico_moedas (usuario_id, quantia, tipo, descricao) VALUES (?, ?, 'ganhou', 'Bônus da TIA')")->execute([$crianca_id, $quantia]);
+            $mensagem = "Bônus de +$quantia moedas aplicado!";
+        }
     } else { $mensagem = "Valor inválido."; $tipo_mensagem = 'erro'; }
 }
 
@@ -84,11 +102,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['aplicar_multa'])) {
     $crianca_id = (int)$_POST['crianca_id'];
     $quantia = (int)$_POST['quantia'];
     if ($crianca_id > 0 && $quantia > 0) {
-        $stmt = $pdo->prepare("UPDATE usuarios SET moedas = GREATEST(0, moedas - ?) WHERE id = ?");
-        $stmt->execute([$quantia, $crianca_id]);
-        $pdo->prepare("INSERT INTO historico_moedas (usuario_id, quantia, tipo, descricao) VALUES (?, ?, 'perdeu', 'Multa aplicada')")->execute([$crianca_id, $quantia]);
-        $mensagem = "Multa de -$quantia moedas aplicada.";
+        if (!verificar_crianca($pdo, $crianca_id, $admin_id)) {
+            $mensagem = "Criança não encontrada."; $tipo_mensagem = 'erro';
+        } else {
+            $stmt = $pdo->prepare("UPDATE usuarios SET moedas = GREATEST(0, moedas - ?) WHERE id = ?");
+            $stmt->execute([$quantia, $crianca_id]);
+            $pdo->prepare("INSERT INTO historico_moedas (usuario_id, quantia, tipo, descricao) VALUES (?, ?, 'perdeu', 'Multa aplicada')")->execute([$crianca_id, $quantia]);
+            $mensagem = "Multa de -$quantia moedas aplicada.";
+        }
     } else { $mensagem = "Valor inválido."; $tipo_mensagem = 'erro'; }
+}
+
+function verificar_crianca($pdo, $crianca_id, $admin_id) {
+    $stmt = $pdo->prepare("SELECT id FROM usuarios WHERE id = ? AND perfil = 'crianca' AND criado_por = ?");
+    $stmt->execute([$crianca_id, $admin_id]);
+    return $stmt->fetch() ? true : false;
 }
 
 function meta_atual($moedas) {
@@ -104,18 +132,22 @@ function meta_atual($moedas) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['resgatar_premio'])) {
     csrf_validate();
     $crianca_id = (int)$_POST['crianca_id'];
-    $stmt_m = $pdo->prepare("SELECT moedas FROM usuarios WHERE id = ?");
-    $stmt_m->execute([$crianca_id]);
-    $moedas_crianca = (int)$stmt_m->fetchColumn();
-    $meta_valor = meta_atual($moedas_crianca);
-    $stmt = $pdo->prepare("UPDATE usuarios SET moedas = GREATEST(0, moedas - ?) WHERE id = ? AND moedas >= ?");
-    $stmt->execute([$meta_valor, $crianca_id, $meta_valor]);
-    if ($stmt->rowCount() > 0) {
-        $pdo->prepare("INSERT INTO historico_moedas (usuario_id, quantia, tipo, descricao) VALUES (?, ?, 'perdeu', ?)")->execute([$crianca_id, $meta_valor, "Prêmio de {$meta_valor} moedas resgatado"]);
-        $mensagem = "Prêmio de {$meta_valor} moedas resgatado! 🎉";
+    if (!verificar_crianca($pdo, $crianca_id, $admin_id)) {
+        $mensagem = "Criança não encontrada."; $tipo_mensagem = 'erro';
     } else {
-        $mensagem = "Essa criança não atingiu a meta de {$meta_valor} moedas.";
-        $tipo_mensagem = 'erro';
+        $stmt_m = $pdo->prepare("SELECT moedas FROM usuarios WHERE id = ?");
+        $stmt_m->execute([$crianca_id]);
+        $moedas_crianca = (int)$stmt_m->fetchColumn();
+        $meta_valor = meta_atual($moedas_crianca);
+        $stmt = $pdo->prepare("UPDATE usuarios SET moedas = GREATEST(0, moedas - ?) WHERE id = ? AND moedas >= ?");
+        $stmt->execute([$meta_valor, $crianca_id, $meta_valor]);
+        if ($stmt->rowCount() > 0) {
+            $pdo->prepare("INSERT INTO historico_moedas (usuario_id, quantia, tipo, descricao) VALUES (?, ?, 'perdeu', ?)")->execute([$crianca_id, $meta_valor, "Prêmio de {$meta_valor} moedas resgatado"]);
+            $mensagem = "Prêmio de {$meta_valor} moedas resgatado! 🎉";
+        } else {
+            $mensagem = "Essa criança não atingiu a meta de {$meta_valor} moedas.";
+            $tipo_mensagem = 'erro';
+        }
     }
 }
 
@@ -165,9 +197,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['trocar_senha_crianca'
     } elseif ($nova_senha !== $confirmar) {
         $mensagem = "A confirmação não coincide com a nova senha."; $tipo_mensagem = 'erro';
     } else {
-        // Verificar se o destino é realmente uma criança
-        $stmt = $pdo->prepare("SELECT id FROM usuarios WHERE id = ? AND perfil = 'crianca'");
-        $stmt->execute([$crianca_id]);
+        // Verificar se o destino é uma criança vinculada a este admin
+        $stmt = $pdo->prepare("SELECT id FROM usuarios WHERE id = ? AND perfil = 'crianca' AND criado_por = ?");
+        $stmt->execute([$crianca_id, $admin_id]);
         if (!$stmt->fetch()) {
             $mensagem = "Criança não encontrada."; $tipo_mensagem = 'erro';
         } else {
@@ -178,20 +210,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['trocar_senha_crianca'
     }
 }
 
-// Criar novo perfil de criança
+// Buscar lista de admins para o dropdown
+$stmt_admins = $pdo->query("SELECT id, nome FROM usuarios WHERE perfil = 'admin' ORDER BY nome ASC");
+$admins = $stmt_admins->fetchAll();
+
+// Criar novo perfil (criança ou admin)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['criar_crianca'])) {
     csrf_validate();
     $nome = trim($_POST['nome']);
     $username = trim($_POST['username']);
     $senha = trim($_POST['senha']);
+    $email = trim($_POST['email'] ?? '');
+    $perfil = $_POST['perfil'] ?? 'crianca';
+    $numero_identificador = trim($_POST['numero_identificador'] ?? '');
+    $admin_vinculado = (int)($_POST['admin_vinculado'] ?? 0);
+    $erro = null;
     if (!empty($nome) && !empty($username) && !empty($senha)) {
-        $hash = password_hash($senha, PASSWORD_DEFAULT);
-        $stmt = $pdo->prepare("INSERT INTO usuarios (nome, username, senha, perfil, moedas) VALUES (?, ?, ?, 'crianca', 0)");
-        try {
-            $stmt->execute([$nome, $username, $hash]);
-            $mensagem = "✅ Perfil de {$nome} criado com sucesso!";
-        } catch (\PDOException $e) {
-            $mensagem = "Erro: username '{$username}' já existe.";
+        if (!empty($email)) {
+            $stmt = $pdo->prepare("SELECT id FROM usuarios WHERE email = ?");
+            $stmt->execute([$email]);
+            if ($stmt->fetch()) {
+                $erro = "Erro: email '{$email}' já está cadastrado.";
+            }
+        }
+        if (!$erro) {
+            $hash = password_hash($senha, PASSWORD_DEFAULT);
+            if ($perfil === 'crianca') {
+                $criado_por = ($admin_vinculado > 0) ? $admin_vinculado : $admin_id;
+            } else {
+                $criado_por = null;
+            }
+            $stmt = $pdo->prepare("INSERT INTO usuarios (nome, username, senha, email, perfil, moedas, criado_por, numero_identificador) VALUES (?, ?, ?, ?, ?, 0, ?, ?)");
+            try {
+                $stmt->execute([$nome, $username, $hash, $email ?: null, $perfil, $criado_por, $numero_identificador ?: null]);
+                $tipo = $perfil === 'admin' ? 'Admin' : 'Perfil';
+                $mensagem = "✅ {$tipo} de {$nome} criado com sucesso!";
+            } catch (\PDOException $e) {
+                $erro = "Erro: username '{$username}' já existe.";
+            }
+        }
+        if ($erro) {
+            $mensagem = $erro;
             $tipo_mensagem = 'erro';
         }
     } else {
@@ -200,13 +259,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['criar_crianca'])) {
     }
 }
 
-// Buscar crianças
-$stmt = $pdo->query("SELECT id, nome, moedas FROM usuarios WHERE perfil = 'crianca' ORDER BY nome ASC");
+// Excluir perfil de criança
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['excluir_crianca'])) {
+    csrf_validate();
+    $crianca_id = (int)$_POST['crianca_id'];
+    $stmt = $pdo->prepare("DELETE FROM usuarios WHERE id = ? AND perfil = 'crianca' AND criado_por = ?");
+    $stmt->execute([$crianca_id, $admin_id]);
+    $mensagem = "✅ Perfil excluído com sucesso!";
+    header("Location: admin.php#tab-criancas");
+    exit;
+}
+
+// Buscar crianças (apenas as vinculadas ao admin logado)
+$stmt = $pdo->prepare("SELECT id, nome, email, moedas, numero_identificador FROM usuarios WHERE perfil = 'crianca' AND criado_por = ? ORDER BY nome ASC");
+$stmt->execute([$admin_id]);
 $criancas = $stmt->fetchAll();
 
-// Buscar tarefas de cada criança (otimizado: 1 query)
+// Buscar tarefas de cada criança (apenas do admin logado)
 $tarefas_por_usuario = [];
-$todas_tarefas = $pdo->query("SELECT id, usuario_id, descricao, valor, dia_semana FROM tarefas_semana ORDER BY usuario_id, dia_semana, id")->fetchAll();
+$todas_tarefas = $pdo->prepare("SELECT t.id, t.usuario_id, t.descricao, t.valor, t.dia_semana, t.status FROM tarefas_semana t JOIN usuarios u ON u.id = t.usuario_id WHERE u.criado_por = ? ORDER BY t.usuario_id, t.dia_semana, t.id");
+$todas_tarefas->execute([$admin_id]);
+$todas_tarefas = $todas_tarefas->fetchAll();
 foreach ($todas_tarefas as $t) {
     $tarefas_por_usuario[$t['usuario_id']][] = $t;
 }
@@ -217,39 +290,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enviar_mensagem'])) {
     $crianca_id = (int)$_POST['crianca_id_msg'];
     $texto = trim($_POST['texto_mensagem']);
     if ($crianca_id > 0 && !empty($texto)) {
-        $pdo->prepare("INSERT INTO mensagens (remetente_id, destinatario_id, mensagem) VALUES (NULL, ?, ?)")->execute([$crianca_id, $texto]);
-        $mensagem = "💬 Mensagem enviada com sucesso!";
+        if (!verificar_crianca($pdo, $crianca_id, $admin_id)) {
+            $mensagem = "Criança não encontrada."; $tipo_mensagem = 'erro';
+        } else {
+            $pdo->prepare("INSERT INTO mensagens (remetente_id, destinatario_id, mensagem) VALUES (NULL, ?, ?)")->execute([$crianca_id, $texto]);
+            $mensagem = "💬 Mensagem enviada com sucesso!";
+        }
     } else { $mensagem = "Preencha todos os campos."; $tipo_mensagem = 'erro'; }
 }
 
 // Marcar mensagens das crianças como lidas
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['marcar_msg_crianca_lidas'])) {
     csrf_validate();
-    $pdo->exec("UPDATE mensagens SET lida = 1 WHERE remetente_id IS NOT NULL AND lida = 0");
+    $pdo->prepare("UPDATE mensagens m JOIN usuarios u ON u.id = m.remetente_id SET m.lida = 1 WHERE u.criado_por = ? AND m.lida = 0")->execute([$admin_id]);
     header("Location: admin.php#tab-mensagens");
     exit;
 }
 
-// Buscar notificações não lidas
-$notificacoes = $pdo->query("SELECT * FROM notificacoes ORDER BY criada_em DESC LIMIT 50")->fetchAll();
-$notificacoes_nao_lidas = $pdo->query("SELECT COUNT(*) FROM notificacoes WHERE lida = 0")->fetchColumn();
+// Buscar notificações (apenas das crianças do admin)
+$notificacoes = $pdo->prepare("SELECT n.* FROM notificacoes n JOIN usuarios u ON u.id = n.crianca_id WHERE u.criado_por = ? ORDER BY n.criada_em DESC LIMIT 50");
+$notificacoes->execute([$admin_id]);
+$notificacoes = $notificacoes->fetchAll();
+$notificacoes_nao_lidas = $pdo->prepare("SELECT COUNT(*) FROM notificacoes n JOIN usuarios u ON u.id = n.crianca_id WHERE u.criado_por = ? AND n.lida = 0");
+$notificacoes_nao_lidas->execute([$admin_id]);
+$notificacoes_nao_lidas = $notificacoes_nao_lidas->fetchColumn();
 
 // Marcar como lidas se clicar no tab
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['marcar_lidas'])) {
     csrf_validate();
-    $pdo->exec("UPDATE notificacoes SET lida = 1 WHERE lida = 0");
+    $pdo->prepare("UPDATE notificacoes n JOIN usuarios u ON u.id = n.crianca_id SET n.lida = 1 WHERE u.criado_por = ? AND n.lida = 0")->execute([$admin_id]);
     header("Location: admin.php");
     exit;
 }
 
-// Buscar tarefas concluídas
-$stmt_concluidas = $pdo->query("
+// Buscar tarefas concluídas (apenas do admin logado)
+$stmt_concluidas = $pdo->prepare("
     SELECT tc.id, tc.data_conclusao, tc.tarefa_id, ts.descricao, ts.dia_semana, u.id as crianca_id, u.nome as crianca_nome
     FROM tarefas_cumpridas tc
     JOIN tarefas_semana ts ON ts.id = tc.tarefa_id
     JOIN usuarios u ON u.id = tc.usuario_id
+    WHERE u.criado_por = ?
     ORDER BY tc.data_conclusao DESC, u.nome
 ");
+$stmt_concluidas->execute([$admin_id]);
 $todas_concluidas = $stmt_concluidas->fetchAll();
 
 // Agrupar concluídas por criança
@@ -263,26 +346,30 @@ foreach ($todas_concluidas as $c) {
 // Dados para Home (otimizado: 1 query em vez de 1+2N)
 $hoje = date('Y-m-d');
 $total_criancas = count($criancas);
-$home_criancas = $pdo->query("
+$home_criancas = $pdo->prepare("
     SELECT u.id, u.nome, u.moedas,
            COUNT(DISTINCT ts.id) as total_tarefas,
            COUNT(DISTINCT tc.id) as feitas_hoje
     FROM usuarios u
     LEFT JOIN tarefas_semana ts ON ts.usuario_id = u.id
     LEFT JOIN tarefas_cumpridas tc ON tc.tarefa_id = ts.id AND tc.data_conclusao = '$hoje'
-    WHERE u.perfil = 'crianca'
+    WHERE u.perfil = 'crianca' AND u.criado_por = ?
     GROUP BY u.id
     ORDER BY u.nome
-")->fetchAll();
+");
+$home_criancas->execute([$admin_id]);
+$home_criancas = $home_criancas->fetchAll();
 $total_moedas = array_sum(array_column($home_criancas, 'moedas'));
-$total_msg_nao_lidas_criancas = $pdo->query("SELECT COUNT(*) FROM mensagens WHERE remetente_id IS NOT NULL AND lida = 0")->fetchColumn();
+$total_msg_nao_lidas_criancas = $pdo->prepare("SELECT COUNT(*) FROM mensagens m JOIN usuarios u ON u.id = m.remetente_id WHERE u.criado_por = ? AND m.lida = 0");
+$total_msg_nao_lidas_criancas->execute([$admin_id]);
+$total_msg_nao_lidas_criancas = $total_msg_nao_lidas_criancas->fetchColumn();
 
 // Processar aprovação/recusa de sugestões de prêmios
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['aprovar_sugestao'])) {
     csrf_validate();
     $sugestao_id = (int)$_POST['sugestao_id'];
-    $stmt_s = $pdo->prepare("SELECT s.*, u.nome as crianca_nome FROM sugestoes_premios s JOIN usuarios u ON u.id = s.usuario_id WHERE s.id = ?");
-    $stmt_s->execute([$sugestao_id]);
+    $stmt_s = $pdo->prepare("SELECT s.*, u.nome as crianca_nome FROM sugestoes_premios s JOIN usuarios u ON u.id = s.usuario_id WHERE s.id = ? AND u.criado_por = ?");
+    $stmt_s->execute([$sugestao_id, $admin_id]);
     $sug_data = $stmt_s->fetch();
     if ($sug_data) {
         $pdo->prepare("UPDATE sugestoes_premios SET status = 'aprovado' WHERE id = ?")->execute([$sugestao_id]);
@@ -293,8 +380,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['aprovar_sugestao'])) 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['recusar_sugestao'])) {
     csrf_validate();
     $sugestao_id = (int)$_POST['sugestao_id'];
-    $stmt_s = $pdo->prepare("SELECT s.*, u.nome as crianca_nome FROM sugestoes_premios s JOIN usuarios u ON u.id = s.usuario_id WHERE s.id = ?");
-    $stmt_s->execute([$sugestao_id]);
+    $stmt_s = $pdo->prepare("SELECT s.*, u.nome as crianca_nome FROM sugestoes_premios s JOIN usuarios u ON u.id = s.usuario_id WHERE s.id = ? AND u.criado_por = ?");
+    $stmt_s->execute([$sugestao_id, $admin_id]);
     $sug_data = $stmt_s->fetch();
     if ($sug_data) {
         $pdo->prepare("UPDATE sugestoes_premios SET status = 'recusado' WHERE id = ?")->execute([$sugestao_id]);
@@ -303,22 +390,71 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['recusar_sugestao'])) 
     }
 }
 
-// Buscar sugestões de prêmios
-$sugestoes_premios = $pdo->query("
+// Processar aprovação/recusa de sugestões de tarefas
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['aprovar_tarefa_sugerida'])) {
+    csrf_validate();
+    $tarefa_id = (int)$_POST['tarefa_id'];
+    $novo_valor = max(1, (int)($_POST['valor_tarefa'] ?? 1));
+    $stmt_s = $pdo->prepare("SELECT t.*, u.nome as crianca_nome FROM tarefas_semana t JOIN usuarios u ON u.id = t.usuario_id WHERE t.id = ? AND u.criado_por = ?");
+    $stmt_s->execute([$tarefa_id, $admin_id]);
+    $tarefa_data = $stmt_s->fetch();
+    if ($tarefa_data) {
+        $pdo->prepare("UPDATE tarefas_semana SET status = 'aprovado', valor = ? WHERE id = ?")->execute([$novo_valor, $tarefa_id]);
+        $pdo->prepare("INSERT INTO mensagens (remetente_id, destinatario_id, mensagem) VALUES (NULL, ?, ?)")->execute([$tarefa_data['usuario_id'], "✅ Sua tarefa \"{$tarefa_data['descricao']}\" foi APROVADA! +{$novo_valor} 💰"]);
+        $msg_sucesso = urlencode("✅ Tarefa sugerida aprovada! Criança notificada.");
+        header("Location: admin.php?msg={$msg_sucesso}#tab-sugestoes-tarefas");
+        exit;
+    }
+}
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['recusar_tarefa_sugerida'])) {
+    csrf_validate();
+    $tarefa_id = (int)$_POST['tarefa_id'];
+    $stmt_s = $pdo->prepare("SELECT t.*, u.nome as crianca_nome FROM tarefas_semana t JOIN usuarios u ON u.id = t.usuario_id WHERE t.id = ? AND u.criado_por = ?");
+    $stmt_s->execute([$tarefa_id, $admin_id]);
+    $tarefa_data = $stmt_s->fetch();
+    if ($tarefa_data) {
+        $pdo->prepare("UPDATE tarefas_semana SET status = 'recusado' WHERE id = ?")->execute([$tarefa_id]);
+        $pdo->prepare("INSERT INTO mensagens (remetente_id, destinatario_id, mensagem) VALUES (NULL, ?, ?)")->execute([$tarefa_data['usuario_id'], "❌ Sua tarefa \"{$tarefa_data['descricao']}\" não foi aprovada dessa vez. Continue tentando! 💪"]);
+        $msg_sucesso = urlencode("❌ Tarefa sugerida recusada. Criança notificada.");
+        header("Location: admin.php?msg={$msg_sucesso}#tab-sugestoes-tarefas");
+        exit;
+    }
+}
+
+// Buscar sugestões de tarefas pendentes (apenas das crianças do admin)
+$tarefas_sugeridas = $pdo->prepare("
+    SELECT t.*, u.nome as crianca_nome
+    FROM tarefas_semana t
+    JOIN usuarios u ON u.id = t.usuario_id
+    WHERE t.status = 'pendente' AND u.criado_por = ?
+    ORDER BY t.id DESC
+    LIMIT 50
+");
+$tarefas_sugeridas->execute([$admin_id]);
+$tarefas_sugeridas = $tarefas_sugeridas->fetchAll();
+$tarefas_sugeridas_pendentes = count($tarefas_sugeridas);
+
+// Buscar sugestões de prêmios (apenas das crianças do admin)
+$sugestoes_premios = $pdo->prepare("
     SELECT s.*, u.nome as crianca_nome
     FROM sugestoes_premios s
     JOIN usuarios u ON u.id = s.usuario_id
+    WHERE u.criado_por = ?
     ORDER BY s.criada_em DESC
     LIMIT 50
-")->fetchAll();
-$sugestoes_pendentes = $pdo->query("SELECT COUNT(*) FROM sugestoes_premios WHERE status = 'pendente'")->fetchColumn();
+");
+$sugestoes_premios->execute([$admin_id]);
+$sugestoes_premios = $sugestoes_premios->fetchAll();
+$sugestoes_pendentes = $pdo->prepare("SELECT COUNT(*) FROM sugestoes_premios s JOIN usuarios u ON u.id = s.usuario_id WHERE u.criado_por = ? AND s.status = 'pendente'");
+$sugestoes_pendentes->execute([$admin_id]);
+$sugestoes_pendentes = $sugestoes_pendentes->fetchColumn();
 ?>
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Painel do Admin - Controle da Mamãe</title>
+    <title>Painel do Admin - <?php echo htmlspecialchars($_SESSION['usuario_nome']); ?></title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body class="admin-body">
@@ -328,8 +464,7 @@ $sugestoes_pendentes = $pdo->query("SELECT COUNT(*) FROM sugestoes_premios WHERE
         <!-- ===== SIDEBAR ===== -->
         <aside class="admin-sidebar">
             <div class="sidebar-brand">
-                <img src="imagens/larissa.jpg" alt="Larissa" class="sidebar-avatar">
-                <span class="sidebar-title">Painel da Titia</span>
+                <span class="sidebar-title">👤 <?php echo htmlspecialchars($_SESSION['usuario_nome']); ?></span>
             </div>
             <nav class="sidebar-nav">
                 <button class="sidebar-item active" data-tab="home">
@@ -375,6 +510,13 @@ $sugestoes_pendentes = $pdo->query("SELECT COUNT(*) FROM sugestoes_premios WHERE
                     <span class="si-text">Sugestões</span>
                     <?php if ($sugestoes_pendentes > 0): ?>
                         <span class="notif-badge"><?php echo $sugestoes_pendentes; ?></span>
+                    <?php endif; ?>
+                </button>
+                <button class="sidebar-item" data-tab="sugestoes-tarefas">
+                    <span class="si-icon">📝</span>
+                    <span class="si-text">Sug. Tarefas</span>
+                    <?php if ($tarefas_sugeridas_pendentes > 0): ?>
+                        <span class="notif-badge"><?php echo $tarefas_sugeridas_pendentes; ?></span>
                     <?php endif; ?>
                 </button>
                 <button class="sidebar-item" data-tab="senhas">
@@ -425,6 +567,10 @@ $sugestoes_pendentes = $pdo->query("SELECT COUNT(*) FROM sugestoes_premios WHERE
                         <div class="ahc-valor"><?php echo $notificacoes_nao_lidas; ?></div>
                         <div class="ahc-label">Notificações</div>
                     </div>
+                </div>
+
+                <div style="text-align:right; margin-bottom:15px;">
+                    <a href="#tab-criancas" class="btn-add" onclick="ativarAbaAdmin('criancas')">➕ Adicionar Criança</a>
                 </div>
 
                 <div class="section-title">👶 Resumo das Crianças</div>
@@ -531,7 +677,7 @@ $sugestoes_pendentes = $pdo->query("SELECT COUNT(*) FROM sugestoes_premios WHERE
 
                 <div class="form-card">
                     <h3>✏️ Novo Perfil</h3>
-                    <form method="POST" class="form-criar-crianca">
+                    <form method="POST" class="form-criar-crianca" id="formCriarPerfil">
                         <div class="form-group">
                             <label for="nome">Nome completo</label>
                             <input type="text" name="nome" id="nome" placeholder="Ex: Miguel" required>
@@ -541,11 +687,42 @@ $sugestoes_pendentes = $pdo->query("SELECT COUNT(*) FROM sugestoes_premios WHERE
                             <input type="text" name="username" id="username" placeholder="Ex: miguel" required>
                         </div>
                         <div class="form-group">
+                            <label for="email">Email (opcional)</label>
+                            <input type="email" name="email" id="email" placeholder="Ex: miguel@email.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="perfil">Tipo de Perfil</label>
+                            <select name="perfil" id="perfil" required onchange="toggleAdminSelect()">
+                                <option value="crianca">👶 Criança</option>
+                                <option value="admin">👤 Admin</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="adminVinculadoGroup">
+                            <label for="admin_vinculado">Pertence ao Admin</label>
+                            <select name="admin_vinculado" id="admin_vinculado">
+                                <?php foreach ($admins as $a): ?>
+                                    <option value="<?php echo $a['id']; ?>" <?php echo $a['id'] === $admin_id ? 'selected' : ''; ?>><?php echo htmlspecialchars($a['nome']); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="numero_identificador">Nº Identificador (opcional)</label>
+                            <input type="text" name="numero_identificador" id="numero_identificador" placeholder="Ex: 001, A-123">
+                        </div>
+                        <div class="form-group">
                             <label for="senha">Senha</label>
                             <input type="password" name="senha" id="senha" placeholder="Senha de acesso" required>
                         </div>
                         <button type="submit" name="criar_crianca" class="btn-criar">Criar Perfil</button>
                     </form>
+                    <script>
+                    function toggleAdminSelect() {
+                        var perfil = document.getElementById('perfil').value;
+                        var group = document.getElementById('adminVinculadoGroup');
+                        group.style.display = perfil === 'crianca' ? 'block' : 'none';
+                    }
+                    toggleAdminSelect();
+                    </script>
                 </div>
 
                 <div class="list-card">
@@ -557,7 +734,10 @@ $sugestoes_pendentes = $pdo->query("SELECT COUNT(*) FROM sugestoes_premios WHERE
                                     <tr>
                                         <th>ID</th>
                                         <th>Nome</th>
+                                        <th>Email</th>
+                                        <th>Nº Ident.</th>
                                         <th>Moedas</th>
+                                        <th style="width:60px;">Ações</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -565,7 +745,17 @@ $sugestoes_pendentes = $pdo->query("SELECT COUNT(*) FROM sugestoes_premios WHERE
                                         <tr>
                                             <td><?php echo $c['id']; ?></td>
                                             <td><?php echo htmlspecialchars($c['nome']); ?></td>
+                                            <td><?php echo htmlspecialchars($c['email'] ?? ''); ?></td>
+                                            <td><?php echo htmlspecialchars($c['numero_identificador'] ?? ''); ?></td>
                                             <td><?php echo (int)$c['moedas']; ?></td>
+                                            <td>
+                                                <form method="POST" onsubmit="return confirm('Excluir o perfil de <?php echo htmlspecialchars($c['nome']); ?>? Todas as tarefas e histórico serão removidos.')">
+                                                    <input type="hidden" name="csrf_token" value="<?php echo csrf_token(); ?>">
+                                                    <input type="hidden" name="excluir_crianca" value="1">
+                                                    <input type="hidden" name="crianca_id" value="<?php echo $c['id']; ?>">
+                                                    <button type="submit" class="btn-excluir" title="Excluir perfil">🗑️</button>
+                                                </form>
+                                            </td>
                                         </tr>
                                     <?php endforeach; ?>
                                 </tbody>
@@ -756,13 +946,15 @@ $sugestoes_pendentes = $pdo->query("SELECT COUNT(*) FROM sugestoes_premios WHERE
                 </div>
 
                 <?php
-                $stmt_extrato = $pdo->query("
+                $stmt_extrato = $pdo->prepare("
                     SELECT h.*, u.nome as crianca_nome
                     FROM historico_moedas h
                     JOIN usuarios u ON u.id = h.usuario_id
+                    WHERE u.criado_por = ?
                     ORDER BY h.criada_em DESC
                     LIMIT 50
                 ");
+                $stmt_extrato->execute([$admin_id]);
                 $extrato_geral = $stmt_extrato->fetchAll();
                 ?>
 
@@ -868,16 +1060,19 @@ $sugestoes_pendentes = $pdo->query("SELECT COUNT(*) FROM sugestoes_premios WHERE
 
                 <!-- Mensagens das crianças -->
                 <?php
-                $stmt_msg_criancas = $pdo->query("
+                $stmt_msg_criancas = $pdo->prepare("
                     SELECT m.id, m.mensagem, m.criada_em, m.lida, u.nome as crianca_nome
                     FROM mensagens m
                     JOIN usuarios u ON u.id = m.remetente_id
-                    WHERE m.remetente_id IS NOT NULL AND m.destinatario_id IS NULL
+                    WHERE m.remetente_id IS NOT NULL AND m.destinatario_id IS NULL AND u.criado_por = ?
                     ORDER BY m.criada_em DESC
                     LIMIT 30
                 ");
+                $stmt_msg_criancas->execute([$admin_id]);
                 $msg_criancas = $stmt_msg_criancas->fetchAll();
-                $msg_criancas_nao_lidas = $pdo->query("SELECT COUNT(*) FROM mensagens WHERE remetente_id IS NOT NULL AND destinatario_id IS NULL AND lida = 0")->fetchColumn();
+                $msg_criancas_nao_lidas = $pdo->prepare("SELECT COUNT(*) FROM mensagens m JOIN usuarios u ON u.id = m.remetente_id WHERE u.criado_por = ? AND m.destinatario_id IS NULL AND m.lida = 0");
+                $msg_criancas_nao_lidas->execute([$admin_id]);
+                $msg_criancas_nao_lidas = $msg_criancas_nao_lidas->fetchColumn();
                 ?>
                 <div class="admin-form-card">
                     <h3>📨 Respostas das Crianças <?php if ($msg_criancas_nao_lidas > 0): ?><span class="badge-msg"><?php echo $msg_criancas_nao_lidas; ?> nova(s)</span><?php endif; ?></h3>
@@ -906,14 +1101,15 @@ $sugestoes_pendentes = $pdo->query("SELECT COUNT(*) FROM sugestoes_premios WHERE
 
                 <!-- Histórico de mensagens enviadas pela TIA -->
                 <?php
-                $stmt_msg = $pdo->query("
+                $stmt_msg = $pdo->prepare("
                     SELECT m.id, m.mensagem, m.criada_em, m.lida, u.nome as crianca_nome
                     FROM mensagens m
                     JOIN usuarios u ON u.id = m.destinatario_id
-                    WHERE m.remetente_id IS NULL
+                    WHERE m.remetente_id IS NULL AND u.criado_por = ?
                     ORDER BY m.criada_em DESC
                     LIMIT 30
                 ");
+                $stmt_msg->execute([$admin_id]);
                 $mensagens_enviadas = $stmt_msg->fetchAll();
                 ?>
                 <div class="admin-form-card">
@@ -1001,6 +1197,60 @@ $sugestoes_pendentes = $pdo->query("SELECT COUNT(*) FROM sugestoes_premios WHERE
                                         </form>
                                     </div>
                                 <?php endif; ?>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            </section>
+
+            <!-- ===== TAB: SUGESTÕES DE TAREFAS ===== -->
+            <section class="admin-tab" id="tab-sugestoes-tarefas" style="display:none">
+                <div class="tab-header">
+                    <h2>📝 Sugestões de Tarefas</h2>
+                    <p>Autorize ou recuse as tarefas sugeridas pelas crianças</p>
+                </div>
+
+                <?php if (count($tarefas_sugeridas) === 0): ?>
+                    <div class="empty-state">
+                        <span class="empty-icon">💭</span>
+                        <p>Nenhuma sugestão de tarefa pendente.</p>
+                    </div>
+                <?php else: ?>
+                    <div class="notif-header" style="margin-bottom:16px">
+                        <span class="notif-info">
+                            <?php echo count($tarefas_sugeridas); ?> sugestão(ões) pendente(s)
+                        </span>
+                    </div>
+
+                    <?php foreach ($tarefas_sugeridas as $st):
+                        $card_style = "background:rgba(5,7,8,0.6);border:1px solid rgba(255,255,255,0.06);border-radius:14px;padding:16px;margin-bottom:12px;border-color:#FBBF24;background:rgba(251,191,36,0.05)";
+                        $dia_nome = $dias_nomes[(int)$st['dia_semana']];
+                    ?>
+                        <div style="<?php echo $card_style; ?>">
+                            <div style="display:flex;align-items:flex-start;gap:14px">
+                                <span style="font-size:24px">⏳</span>
+                                <div style="flex:1">
+                                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                                        <strong style="font-size:16px;color:#fff"><?php echo htmlspecialchars($st['descricao']); ?></strong>
+                                        <span style="font-size:12px;padding:2px 10px;border-radius:20px;font-weight:600;background:#FBBF2422;color:#FBBF24">Pendente</span>
+                                    </div>
+                                    <div style="margin-top:8px;font-size:12px;color:#64748b">
+                                        👤 <?php echo htmlspecialchars($st['crianca_nome']); ?> •
+                                        📅 <?php echo $dia_nome; ?> •
+                                        💰 Valor sugerido: <?php echo (int)$st['valor']; ?>
+                                    </div>
+                                </div>
+                                <div style="display:flex;gap:6px;flex-shrink:0;align-items:center">
+                                    <form method="POST" style="margin:0;display:flex;gap:6px;align-items:center" onsubmit="return confirm('Aprovar esta tarefa?')">
+                                        <input type="hidden" name="tarefa_id" value="<?php echo $st['id']; ?>">
+                                        <input type="number" name="valor_tarefa" value="1" min="1" max="99" style="width:60px;padding:8px 6px;border:1px solid rgba(255,255,255,0.1);border-radius:6px;font-size:13px;font-family:inherit;color:#fff;background:rgba(0,0,0,0.3);outline:none;text-align:center" title="Valor em moedas">
+                                        <button type="submit" name="aprovar_tarefa_sugerida" class="btn-acao bonus" style="padding:8px 16px;border:none;border-radius:8px;cursor:pointer;font-size:13px;background:#22c55e;color:#fff">✅ Aprovar</button>
+                                    </form>
+                                    <form method="POST" style="margin:0" onsubmit="return confirm('Recusar esta tarefa?')">
+                                        <input type="hidden" name="tarefa_id" value="<?php echo $st['id']; ?>">
+                                        <button type="submit" name="recusar_tarefa_sugerida" class="btn-acao multa" style="padding:8px 16px;border:none;border-radius:8px;cursor:pointer;font-size:13px;background:#ef4444;color:#fff">❌ Recusar</button>
+                                    </form>
+                                </div>
                             </div>
                         </div>
                     <?php endforeach; ?>

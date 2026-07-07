@@ -104,7 +104,7 @@ try {
                 SELECT t.id, t.descricao, COALESCE(t.valor, 1) as valor, t.dia_semana,
                     (SELECT COUNT(*) FROM tarefas_cumpridas tc WHERE tc.tarefa_id = t.id AND tc.data_conclusao = ?) as feita_hoje
                 FROM tarefas_semana t
-                WHERE t.usuario_id = ? AND t.dia_semana = ?
+                WHERE t.usuario_id = ? AND t.dia_semana = ? AND t.status = 'aprovado'
                 ORDER BY t.id
             ");
             $stmt->execute([$data_hoje, $user_id, $dia_atual]);
@@ -132,7 +132,7 @@ try {
             $stmt = $pdo->prepare("
                 SELECT t.id, t.descricao, COALESCE(t.valor, 1) as valor, t.dia_semana
                 FROM tarefas_semana t
-                WHERE t.usuario_id = ?
+                WHERE t.usuario_id = ? AND t.status = 'aprovado'
                 ORDER BY t.dia_semana, t.id
             ");
             $stmt->execute([$user_id]);
@@ -364,6 +364,40 @@ try {
             json(['sucesso' => true, 'sugestoes' => $sugestoes]);
             break;
 
+        // ==================== CRIANÇA — SUGERIR TAREFA ====================
+        case 'sugerir_tarefa':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') json_error('Método não permitido.', 405);
+            $user_id = validar_token($pdo);
+            $dia_semana = (int)($_POST['dia_semana'] ?? 0);
+            $descricao = trim($_POST['descricao'] ?? '');
+            $valor = max(1, (int)($_POST['valor'] ?? 1));
+            if (empty($descricao) || $dia_semana < 0 || $dia_semana > 6) json_error('Informe descrição e dia da semana válidos.');
+            $pdo->prepare("INSERT INTO tarefas_semana (usuario_id, descricao, valor, dia_semana, status) VALUES (?, ?, ?, ?, 'pendente')")->execute([$user_id, $descricao, $valor, $dia_semana]);
+            $stmt = $pdo->prepare("SELECT nome FROM usuarios WHERE id = ?");
+            $stmt->execute([$user_id]);
+            $user = $stmt->fetch();
+            $pdo->prepare("INSERT INTO notificacoes (crianca_id, crianca_nome, mensagem) VALUES (?, ?, ?)")->execute([$user_id, $user['nome'], "{$user['nome']} sugeriu uma tarefa de {$valor} moedas: \"{$descricao}\""]);
+            json(['sucesso' => true, 'mensagem' => 'Tarefa sugerida! Aguarde aprovação.', 'id' => (int)$pdo->lastInsertId()]);
+            break;
+
+        case 'minhas_sugestoes_tarefas':
+            $user_id = validar_token($pdo);
+            $stmt = $pdo->prepare("SELECT id, descricao, valor, dia_semana, status, criada_em FROM tarefas_semana WHERE usuario_id = ? AND status != 'aprovado' ORDER BY id DESC");
+            $stmt->execute([$user_id]);
+            $sugestoes = [];
+            while ($row = $stmt->fetch()) {
+                $sugestoes[] = [
+                    'id' => (int)$row['id'],
+                    'descricao' => $row['descricao'],
+                    'valor' => (int)$row['valor'],
+                    'dia_semana' => (int)$row['dia_semana'],
+                    'status' => $row['status'],
+                    'data' => $row['criada_em']
+                ];
+            }
+            json(['sucesso' => true, 'sugestoes' => $sugestoes]);
+            break;
+
         // ==================== CRIANÇA — MENSAGENS ====================
         case 'minhas_mensagens':
             $user_id = validar_token($pdo);
@@ -402,16 +436,18 @@ try {
 
         // ==================== ADMIN ====================
         case 'admin_criancas':
-            validar_admin($pdo);
+            $admin_id = validar_admin($pdo);
 
-            $stmt = $pdo->query("SELECT id, nome, username, moedas FROM usuarios WHERE perfil = 'crianca' ORDER BY nome");
+            $stmt = $pdo->prepare("SELECT id, nome, username, moedas, numero_identificador FROM usuarios WHERE perfil = 'crianca' AND criado_por = ? ORDER BY nome");
+            $stmt->execute([$admin_id]);
             $criancas = [];
             while ($row = $stmt->fetch()) {
                 $criancas[] = [
                     'id' => (int)$row['id'],
                     'nome' => $row['nome'],
                     'username' => $row['username'],
-                    'moedas' => (int)$row['moedas']
+                    'moedas' => (int)$row['moedas'],
+                    'numero_identificador' => $row['numero_identificador'] ?? ''
                 ];
             }
             json(['sucesso' => true, 'criancas' => $criancas]);
@@ -419,29 +455,51 @@ try {
 
         case 'admin_criar_crianca':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') json_error('Método não permitido.', 405);
-            validar_admin($pdo);
+            $admin_id = validar_admin($pdo);
 
             $nome = trim($_POST['nome'] ?? '');
             $username = trim($_POST['username'] ?? '');
             $senha = $_POST['senha'] ?? '';
+            $email = trim($_POST['email'] ?? '');
+            $perfil = $_POST['perfil'] ?? 'crianca';
+            $numero_identificador = trim($_POST['numero_identificador'] ?? '');
+            $admin_vinculado = (int)($_POST['admin_vinculado'] ?? 0);
 
             if (empty($nome) || empty($username) || empty($senha)) json_error('Preencha todos os campos.');
 
+            if (!empty($email)) {
+                $stmt = $pdo->prepare("SELECT id FROM usuarios WHERE email = ?");
+                $stmt->execute([$email]);
+                if ($stmt->fetch()) {
+                    json_error("Email '{$email}' já está cadastrado.");
+                }
+            }
+
             $hash = password_hash($senha, PASSWORD_DEFAULT);
-            $stmt = $pdo->prepare("INSERT INTO usuarios (nome, username, senha, perfil, moedas) VALUES (?, ?, ?, 'crianca', 0)");
+            if ($perfil === 'crianca') {
+                $criado_por = ($admin_vinculado > 0) ? $admin_vinculado : $admin_id;
+            } else {
+                $criado_por = null;
+            }
+            $stmt = $pdo->prepare("INSERT INTO usuarios (nome, username, senha, email, perfil, moedas, criado_por, numero_identificador) VALUES (?, ?, ?, ?, ?, 0, ?, ?)");
 
             try {
-                $stmt->execute([$nome, $username, $hash]);
-                json(['sucesso' => true, 'mensagem' => "Perfil de {$nome} criado!", 'id' => (int)$pdo->lastInsertId()]);
+                $stmt->execute([$nome, $username, $hash, $email ?: null, $perfil, $criado_por, $numero_identificador ?: null]);
+                $tipo = $perfil === 'admin' ? 'Admin' : 'Perfil';
+                json(['sucesso' => true, 'mensagem' => "{$tipo} de {$nome} criado!", 'id' => (int)$pdo->lastInsertId()]);
             } catch (\PDOException $e) {
                 json_error("Username '{$username}' já existe.");
             }
             break;
 
         case 'admin_tarefas':
-            validar_admin($pdo);
+            $admin_id = validar_admin($pdo);
             $crianca_id = (int)($_GET['crianca_id'] ?? 0);
             if ($crianca_id <= 0) json_error('Informe crianca_id.');
+
+            $stmt = $pdo->prepare("SELECT id FROM usuarios WHERE id = ? AND perfil = 'crianca' AND criado_por = ?");
+            $stmt->execute([$crianca_id, $admin_id]);
+            if (!$stmt->fetch()) json_error('Criança não encontrada.');
 
             $stmt = $pdo->prepare("
                 SELECT t.id, t.descricao, COALESCE(t.valor, 1) as valor, t.dia_semana
@@ -464,7 +522,7 @@ try {
 
         case 'admin_criar_tarefa':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') json_error('Método não permitido.', 405);
-            validar_admin($pdo);
+            $admin_id = validar_admin($pdo);
 
             $crianca_id = (int)($_POST['crianca_id'] ?? 0);
             $dia_semana = (int)($_POST['dia_semana'] ?? 0);
@@ -475,13 +533,17 @@ try {
             if ($dia_semana < 0 || $dia_semana > 6) json_error('Dia da semana inválido.');
             if ($valor < 1) $valor = 1;
 
+            $stmt = $pdo->prepare("SELECT id FROM usuarios WHERE id = ? AND perfil = 'crianca' AND criado_por = ?");
+            $stmt->execute([$crianca_id, $admin_id]);
+            if (!$stmt->fetch()) json_error('Criança não encontrada.');
+
             $pdo->prepare("INSERT INTO tarefas_semana (usuario_id, descricao, valor, dia_semana) VALUES (?, ?, ?, ?)")->execute([$crianca_id, $descricao, $valor, $dia_semana]);
             json(['sucesso' => true, 'mensagem' => 'Tarefa criada!', 'id' => (int)$pdo->lastInsertId()]);
             break;
 
         case 'admin_editar_tarefa':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') json_error('Método não permitido.', 405);
-            validar_admin($pdo);
+            $admin_id = validar_admin($pdo);
 
             $tarefa_id = (int)($_POST['tarefa_id'] ?? 0);
             $descricao = trim($_POST['descricao'] ?? '');
@@ -491,16 +553,24 @@ try {
             if ($tarefa_id <= 0 || empty($descricao)) json_error('Preencha todos os campos.');
             if ($valor < 1) $valor = 1;
 
+            $stmt = $pdo->prepare("SELECT t.id FROM tarefas_semana t JOIN usuarios u ON u.id = t.usuario_id WHERE t.id = ? AND u.criado_por = ?");
+            $stmt->execute([$tarefa_id, $admin_id]);
+            if (!$stmt->fetch()) json_error('Tarefa não encontrada.');
+
             $pdo->prepare("UPDATE tarefas_semana SET descricao = ?, valor = ?, dia_semana = ? WHERE id = ?")->execute([$descricao, $valor, $dia_semana, $tarefa_id]);
             json(['sucesso' => true, 'mensagem' => 'Tarefa atualizada!']);
             break;
 
         case 'admin_deletar_tarefa':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') json_error('Método não permitido.', 405);
-            validar_admin($pdo);
+            $admin_id = validar_admin($pdo);
 
             $tarefa_id = (int)($_POST['tarefa_id'] ?? 0);
             if ($tarefa_id <= 0) json_error('ID inválido.');
+
+            $stmt = $pdo->prepare("SELECT t.id FROM tarefas_semana t JOIN usuarios u ON u.id = t.usuario_id WHERE t.id = ? AND u.criado_por = ?");
+            $stmt->execute([$tarefa_id, $admin_id]);
+            if (!$stmt->fetch()) json_error('Tarefa não encontrada.');
 
             $pdo->prepare("DELETE FROM tarefas_cumpridas WHERE tarefa_id = ?")->execute([$tarefa_id]);
             $pdo->prepare("DELETE FROM tarefas_semana WHERE id = ?")->execute([$tarefa_id]);
@@ -509,15 +579,15 @@ try {
 
         case 'admin_bonus':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') json_error('Método não permitido.', 405);
-            validar_admin($pdo);
+            $admin_id = validar_admin($pdo);
 
             $crianca_id = (int)($_POST['crianca_id'] ?? 0);
             $quantia = (int)($_POST['quantia'] ?? 0);
 
             if ($crianca_id <= 0 || $quantia <= 0) json_error('Dados inválidos.');
 
-            $stmt = $pdo->prepare("SELECT nome FROM usuarios WHERE id = ?");
-            $stmt->execute([$crianca_id]);
+            $stmt = $pdo->prepare("SELECT nome FROM usuarios WHERE id = ? AND criado_por = ?");
+            $stmt->execute([$crianca_id, $admin_id]);
             $user = $stmt->fetch();
             if (!$user) json_error('Criança não encontrada.');
 
@@ -534,15 +604,15 @@ try {
 
         case 'admin_multa':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') json_error('Método não permitido.', 405);
-            validar_admin($pdo);
+            $admin_id = validar_admin($pdo);
 
             $crianca_id = (int)($_POST['crianca_id'] ?? 0);
             $quantia = (int)($_POST['quantia'] ?? 0);
 
             if ($crianca_id <= 0 || $quantia <= 0) json_error('Dados inválidos.');
 
-            $stmt = $pdo->prepare("SELECT nome FROM usuarios WHERE id = ?");
-            $stmt->execute([$crianca_id]);
+            $stmt = $pdo->prepare("SELECT nome FROM usuarios WHERE id = ? AND criado_por = ?");
+            $stmt->execute([$crianca_id, $admin_id]);
             $user = $stmt->fetch();
             if (!$user) json_error('Criança não encontrada.');
 
@@ -558,9 +628,10 @@ try {
             break;
 
         case 'admin_notificacoes':
-            validar_admin($pdo);
+            $admin_id = validar_admin($pdo);
 
-            $stmt = $pdo->query("SELECT id, crianca_id, crianca_nome, mensagem, lida, criada_em FROM notificacoes ORDER BY criada_em DESC LIMIT 50");
+            $stmt = $pdo->prepare("SELECT n.id, n.crianca_id, n.crianca_nome, n.mensagem, n.lida, n.criada_em FROM notificacoes n JOIN usuarios u ON u.id = n.crianca_id WHERE u.criado_por = ? ORDER BY n.criada_em DESC LIMIT 50");
+            $stmt->execute([$admin_id]);
             $notificacoes = [];
             while ($row = $stmt->fetch()) {
                 $notificacoes[] = [
@@ -576,21 +647,22 @@ try {
             break;
 
         case 'admin_marcar_notificacao_lida':
-            validar_admin($pdo);
+            $admin_id = validar_admin($pdo);
             $notif_id = (int)($_POST['notificacao_id'] ?? 0);
 
             if ($notif_id > 0) {
-                $pdo->prepare("UPDATE notificacoes SET lida = 1 WHERE id = ?")->execute([$notif_id]);
+                $pdo->prepare("UPDATE notificacoes n JOIN usuarios u ON u.id = n.crianca_id SET n.lida = 1 WHERE n.id = ? AND u.criado_por = ?")->execute([$notif_id, $admin_id]);
             } else {
-                $pdo->exec("UPDATE notificacoes SET lida = 1");
+                $pdo->prepare("UPDATE notificacoes n JOIN usuarios u ON u.id = n.crianca_id SET n.lida = 1 WHERE u.criado_por = ?")->execute([$admin_id]);
             }
             json(['sucesso' => true]);
             break;
 
         case 'admin_mensagens':
-            validar_admin($pdo);
+            $admin_id = validar_admin($pdo);
 
-            $stmt = $pdo->query("SELECT m.id, m.mensagem, m.lida, m.criada_em, u.nome as crianca_nome FROM mensagens m JOIN usuarios u ON m.destinatario_id = u.id WHERE m.remetente_id IS NULL ORDER BY m.criada_em DESC LIMIT 50");
+            $stmt = $pdo->prepare("SELECT m.id, m.mensagem, m.lida, m.criada_em, u.nome as crianca_nome FROM mensagens m JOIN usuarios u ON m.destinatario_id = u.id WHERE m.remetente_id IS NULL AND u.criado_por = ? ORDER BY m.criada_em DESC LIMIT 50");
+            $stmt->execute([$admin_id]);
             $mensagens = [];
             while ($row = $stmt->fetch()) {
                 $mensagens[] = [
@@ -606,21 +678,26 @@ try {
 
         case 'admin_enviar_mensagem':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') json_error('Método não permitido.', 405);
-            validar_admin($pdo);
+            $admin_id = validar_admin($pdo);
 
             $crianca_id = (int)($_POST['crianca_id'] ?? 0);
             $texto = trim($_POST['mensagem'] ?? '');
 
             if ($crianca_id <= 0 || empty($texto)) json_error('Preencha todos os campos.');
 
+            $stmt = $pdo->prepare("SELECT id FROM usuarios WHERE id = ? AND perfil = 'crianca' AND criado_por = ?");
+            $stmt->execute([$crianca_id, $admin_id]);
+            if (!$stmt->fetch()) json_error('Criança não encontrada.');
+
             $pdo->prepare("INSERT INTO mensagens (remetente_id, destinatario_id, mensagem) VALUES (NULL, ?, ?)")->execute([$crianca_id, $texto]);
             json(['sucesso' => true, 'mensagem' => 'Mensagem enviada!']);
             break;
 
         case 'admin_sugestoes':
-            validar_admin($pdo);
+            $admin_id = validar_admin($pdo);
 
-            $stmt = $pdo->query("SELECT s.id, s.nome_premio, s.descricao, s.status, s.criada_em, u.nome as crianca_nome FROM sugestoes_premios s JOIN usuarios u ON s.usuario_id = u.id ORDER BY s.criada_em DESC");
+            $stmt = $pdo->prepare("SELECT s.id, s.nome_premio, s.descricao, s.status, s.criada_em, u.nome as crianca_nome FROM sugestoes_premios s JOIN usuarios u ON s.usuario_id = u.id WHERE u.criado_por = ? ORDER BY s.criada_em DESC");
+            $stmt->execute([$admin_id]);
             $sugestoes = [];
             while ($row = $stmt->fetch()) {
                 $sugestoes[] = [
@@ -637,10 +714,14 @@ try {
 
         case 'admin_aprovar_sugestao':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') json_error('Método não permitido.', 405);
-            validar_admin($pdo);
+            $admin_id = validar_admin($pdo);
 
             $sugestao_id = (int)($_POST['sugestao_id'] ?? 0);
             if ($sugestao_id <= 0) json_error('ID inválido.');
+
+            $stmt = $pdo->prepare("SELECT s.id FROM sugestoes_premios s JOIN usuarios u ON u.id = s.usuario_id WHERE s.id = ? AND u.criado_por = ?");
+            $stmt->execute([$sugestao_id, $admin_id]);
+            if (!$stmt->fetch()) json_error('Sugestão não encontrada.');
 
             $pdo->prepare("UPDATE sugestoes_premios SET status = 'aprovado' WHERE id = ?")->execute([$sugestao_id]);
             json(['sucesso' => true, 'mensagem' => 'Sugestão aprovada!']);
@@ -648,23 +729,76 @@ try {
 
         case 'admin_recusar_sugestao':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') json_error('Método não permitido.', 405);
-            validar_admin($pdo);
+            $admin_id = validar_admin($pdo);
 
             $sugestao_id = (int)($_POST['sugestao_id'] ?? 0);
             if ($sugestao_id <= 0) json_error('ID inválido.');
+
+            $stmt = $pdo->prepare("SELECT s.id FROM sugestoes_premios s JOIN usuarios u ON u.id = s.usuario_id WHERE s.id = ? AND u.criado_por = ?");
+            $stmt->execute([$sugestao_id, $admin_id]);
+            if (!$stmt->fetch()) json_error('Sugestão não encontrada.');
 
             $pdo->prepare("UPDATE sugestoes_premios SET status = 'recusado' WHERE id = ?")->execute([$sugestao_id]);
             json(['sucesso' => true, 'mensagem' => 'Sugestão recusada.']);
             break;
 
+        // ==================== ADMIN — SUGESTÕES DE TAREFAS ====================
+        case 'admin_sugestoes_tarefas':
+            $admin_id = validar_admin($pdo);
+            $stmt = $pdo->prepare("SELECT t.*, u.nome as crianca_nome FROM tarefas_semana t JOIN usuarios u ON t.usuario_id = u.id WHERE t.status = 'pendente' AND u.criado_por = ? ORDER BY t.id DESC LIMIT 50");
+            $stmt->execute([$admin_id]);
+            $sugestoes = [];
+            while ($row = $stmt->fetch()) {
+                $sugestoes[] = [
+                    'id' => (int)$row['id'],
+                    'crianca_nome' => $row['crianca_nome'],
+                    'crianca_id' => (int)$row['usuario_id'],
+                    'descricao' => $row['descricao'],
+                    'valor' => (int)$row['valor'],
+                    'dia_semana' => (int)$row['dia_semana'],
+                    'data' => $row['criada_em']
+                ];
+            }
+            json(['sucesso' => true, 'sugestoes' => $sugestoes]);
+            break;
+
+        case 'admin_aprovar_tarefa_sugerida':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') json_error('Método não permitido.', 405);
+            $admin_id = validar_admin($pdo);
+            $tarefa_id = (int)($_POST['tarefa_id'] ?? 0);
+            $valor = max(1, (int)($_POST['valor'] ?? 1));
+            if ($tarefa_id <= 0) json_error('ID inválido.');
+            $stmt = $pdo->prepare("SELECT t.id FROM tarefas_semana t JOIN usuarios u ON u.id = t.usuario_id WHERE t.id = ? AND u.criado_por = ?");
+            $stmt->execute([$tarefa_id, $admin_id]);
+            if (!$stmt->fetch()) json_error('Tarefa não encontrada.');
+            $pdo->prepare("UPDATE tarefas_semana SET status = 'aprovado', valor = ? WHERE id = ?")->execute([$valor, $tarefa_id]);
+            json(['sucesso' => true, 'mensagem' => 'Tarefa aprovada!']);
+            break;
+
+        case 'admin_recusar_tarefa_sugerida':
+            if ($_SERVER['REQUEST_METHOD'] !== 'POST') json_error('Método não permitido.', 405);
+            $admin_id = validar_admin($pdo);
+            $tarefa_id = (int)($_POST['tarefa_id'] ?? 0);
+            if ($tarefa_id <= 0) json_error('ID inválido.');
+            $stmt = $pdo->prepare("SELECT t.id FROM tarefas_semana t JOIN usuarios u ON u.id = t.usuario_id WHERE t.id = ? AND u.criado_por = ?");
+            $stmt->execute([$tarefa_id, $admin_id]);
+            if (!$stmt->fetch()) json_error('Tarefa não encontrada.');
+            $pdo->prepare("UPDATE tarefas_semana SET status = 'recusado' WHERE id = ?")->execute([$tarefa_id]);
+            json(['sucesso' => true, 'mensagem' => 'Tarefa recusada.']);
+            break;
+
         case 'admin_trocar_senha':
             if ($_SERVER['REQUEST_METHOD'] !== 'POST') json_error('Método não permitido.', 405);
-            validar_admin($pdo);
+            $admin_id = validar_admin($pdo);
 
             $crianca_id = (int)($_POST['crianca_id'] ?? 0);
             $nova_senha = $_POST['nova_senha'] ?? '';
 
             if ($crianca_id <= 0 || empty($nova_senha)) json_error('Preencha todos os campos.');
+
+            $stmt = $pdo->prepare("SELECT id FROM usuarios WHERE id = ? AND perfil = 'crianca' AND criado_por = ?");
+            $stmt->execute([$crianca_id, $admin_id]);
+            if (!$stmt->fetch()) json_error('Criança não encontrada.');
 
             $hash = password_hash($nova_senha, PASSWORD_DEFAULT);
             $pdo->prepare("UPDATE usuarios SET senha = ? WHERE id = ?")->execute([$hash, $crianca_id]);
@@ -672,13 +806,13 @@ try {
             break;
 
         case 'admin_premios_ganhos':
-            validar_admin($pdo);
+            $admin_id = validar_admin($pdo);
             $crianca_id = (int)($_GET['crianca_id'] ?? 0);
 
             $sql = "SELECT pr.id, pr.moedas_gastas, pr.valor_premio, pr.descricao, pr.data_resgate, u.nome as crianca_nome
-                    FROM premios_resgatados pr JOIN usuarios u ON pr.usuario_id = u.id";
-            $params = [];
-            if ($crianca_id > 0) { $sql .= " WHERE pr.usuario_id = ?"; $params[] = $crianca_id; }
+                    FROM premios_resgatados pr JOIN usuarios u ON pr.usuario_id = u.id WHERE u.criado_por = ?";
+            $params = [$admin_id];
+            if ($crianca_id > 0) { $sql .= " AND pr.usuario_id = ?"; $params[] = $crianca_id; }
             $sql .= " ORDER BY pr.data_resgate DESC LIMIT 100";
 
             $stmt = $pdo->prepare($sql);
@@ -698,11 +832,15 @@ try {
             break;
 
         case 'admin_extrato':
-            validar_admin($pdo);
+            $admin_id = validar_admin($pdo);
             $crianca_id = (int)($_GET['crianca_id'] ?? 0);
             $limite = min((int)($_GET['limite'] ?? 50), 200);
 
             if ($crianca_id <= 0) json_error('Informe crianca_id.');
+
+            $stmt = $pdo->prepare("SELECT id FROM usuarios WHERE id = ? AND perfil = 'crianca' AND criado_por = ?");
+            $stmt->execute([$crianca_id, $admin_id]);
+            if (!$stmt->fetch()) json_error('Criança não encontrada.');
 
             $stmt = $pdo->prepare("SELECT h.quantia, h.tipo, h.descricao, h.criada_em, u.nome as crianca_nome FROM historico_moedas h JOIN usuarios u ON h.usuario_id = u.id WHERE h.usuario_id = ? ORDER BY h.criada_em DESC LIMIT ?");
             $stmt->execute([$crianca_id, $limite]);
@@ -720,7 +858,7 @@ try {
             break;
 
         case 'admin_concluidas':
-            validar_admin($pdo);
+            $admin_id = validar_admin($pdo);
             $crianca_id = (int)($_GET['crianca_id'] ?? 0);
             $data_inicio = $_GET['data_inicio'] ?? date('Y-m-d', strtotime('-30 days'));
             $data_fim = $_GET['data_fim'] ?? date('Y-m-d');
@@ -729,8 +867,8 @@ try {
                     FROM tarefas_cumpridas tc
                     JOIN tarefas_semana t ON tc.tarefa_id = t.id
                     JOIN usuarios u ON tc.usuario_id = u.id
-                    WHERE tc.data_conclusao BETWEEN ? AND ?";
-            $params = [$data_inicio, $data_fim];
+                    WHERE u.criado_por = ? AND tc.data_conclusao BETWEEN ? AND ?";
+            $params = [$admin_id, $data_inicio, $data_fim];
 
             if ($crianca_id > 0) { $sql .= " AND tc.usuario_id = ?"; $params[] = $crianca_id; }
             $sql .= " ORDER BY tc.data_conclusao DESC, tc.id DESC";
@@ -751,26 +889,26 @@ try {
             break;
 
         case 'admin_dashboard':
-            validar_admin($pdo);
+            $admin_id = validar_admin($pdo);
 
-            $stmt = $pdo->query("SELECT id, nome, moedas FROM usuarios WHERE perfil = 'crianca' ORDER BY nome");
+            $stmt = $pdo->prepare("SELECT id, nome, moedas, numero_identificador FROM usuarios WHERE perfil = 'crianca' AND criado_por = ? ORDER BY nome");
+            $stmt->execute([$admin_id]);
             $criancas = [];
             while ($row = $stmt->fetch()) {
-                $criancas[] = ['id' => (int)$row['id'], 'nome' => $row['nome'], 'moedas' => (int)$row['moedas']];
+                $criancas[] = ['id' => (int)$row['id'], 'nome' => $row['nome'], 'moedas' => (int)$row['moedas'], 'numero_identificador' => $row['numero_identificador'] ?? ''];
             }
 
-            $stmt = $pdo->query("SELECT COUNT(*) FROM notificacoes WHERE lida = 0");
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM notificacoes n JOIN usuarios u ON u.id = n.crianca_id WHERE u.criado_por = ? AND n.lida = 0");
+            $stmt->execute([$admin_id]);
             $notif_nao_lidas = (int)$stmt->fetchColumn();
 
-            $stmt = $pdo->query("SELECT COUNT(*) FROM sugestoes_premios WHERE status = 'pendente'");
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM sugestoes_premios s JOIN usuarios u ON u.id = s.usuario_id WHERE u.criado_por = ? AND s.status = 'pendente'");
+            $stmt->execute([$admin_id]);
             $sugestoes_pendentes = (int)$stmt->fetchColumn();
 
-            $stmt = $pdo->query("SELECT COUNT(*) FROM tarefas_cumpridas WHERE data_conclusao = CURDATE()");
-            $tarefas_hoje = (int)$stmt->fetchColumn();
-
             $data_hoje = date('Y-m-d');
-            $stmt = $pdo->prepare("SELECT COUNT(*) FROM tarefas_cumpridas WHERE data_conclusao = ?");
-            $stmt->execute([$data_hoje]);
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM tarefas_cumpridas tc JOIN usuarios u ON u.id = tc.usuario_id WHERE u.criado_por = ? AND tc.data_conclusao = ?");
+            $stmt->execute([$admin_id, $data_hoje]);
             $total_hoje = (int)$stmt->fetchColumn();
 
             json([
@@ -778,7 +916,7 @@ try {
                 'criancas' => $criancas,
                 'notificacoes_nao_lidas' => $notif_nao_lidas,
                 'sugestoes_pendentes' => $sugestoes_pendentes,
-                'tarefas_hoje' => $tarefas_hoje
+                'tarefas_hoje' => $total_hoje
             ]);
             break;
 

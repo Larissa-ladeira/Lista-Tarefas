@@ -1,4 +1,5 @@
 <?php
+session_set_cookie_params(['lifetime' => 0, 'path' => '/']);
 @session_start();
 require_once 'conexao.php';
 
@@ -62,10 +63,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['concluir_tarefa'])) {
     }
 }
 
-$stmt_user = $pdo->prepare("SELECT moedas FROM usuarios WHERE id = ?");
+$stmt_user = $pdo->prepare("SELECT moedas, auth_provider, cor_fundo FROM usuarios WHERE id = ?");
 $stmt_user->execute([$usuario_id]);
 $dados_user = $stmt_user->fetch();
 $moedas_atuais = $dados_user['moedas'];
+$auth_provider = $dados_user['auth_provider'] ?? 'local';
+$is_google_user = ($auth_provider === 'google');
+$cor_fundo = $dados_user['cor_fundo'] ?? '';
+
+function cor_e_clara($hex) {
+    $hex = ltrim($hex, '#');
+    if (strlen($hex) === 3) $hex = $hex[0].$hex[0].$hex[1].$hex[1].$hex[2].$hex[2];
+    if (strlen($hex) !== 6) return false;
+    $r = hexdec(substr($hex, 0, 2));
+    $g = hexdec(substr($hex, 2, 2));
+    $b = hexdec(substr($hex, 4, 2));
+    return (0.299 * $r + 0.587 * $g + 0.114 * $b) / 255 > 0.55;
+}
+$tema_claro = !empty($cor_fundo) && cor_e_clara($cor_fundo);
 
 $metas = [150, 300, 500, 700, 900, 1100];
 $meta_moedas = 150;
@@ -82,7 +97,7 @@ $stmt_tarefas = $pdo->prepare("
     SELECT t.id, t.descricao, COALESCE(t.valor, 1) as valor,
            (SELECT COUNT(*) FROM tarefas_cumpridas tc WHERE tc.tarefa_id = t.id AND tc.data_conclusao = ?) as feita_hoje
     FROM tarefas_semana t
-    WHERE t.usuario_id = ? AND t.dia_semana = ?
+    WHERE t.usuario_id = ? AND t.dia_semana = ? AND t.status = 'aprovado'
 ");
 $stmt_tarefas->execute([$data_hoje, $usuario_id, $dia_atual]);
 $tarefas_do_dia = $stmt_tarefas->fetchAll();
@@ -225,6 +240,27 @@ $nao_lidas_amigos = $pdo->prepare("SELECT COUNT(*) FROM mensagens WHERE destinat
 $nao_lidas_amigos->execute([$usuario_id]);
 $total_msg_amigos_nao_lidas = $nao_lidas_amigos->fetchColumn();
 
+// Processar sugestão de tarefa
+$msg_sugestao_tarefa = '';
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['sugerir_tarefa'])) {
+    csrf_validate();
+    $dia_semana = (int)$_POST['dia_semana_tarefa'];
+    $descricao = trim($_POST['descricao_tarefa']);
+    $valor = max(1, (int)($_POST['valor_tarefa'] ?? 1));
+    if (!empty($descricao) && $dia_semana >= 0 && $dia_semana <= 6) {
+        $pdo->prepare("INSERT INTO tarefas_semana (usuario_id, descricao, valor, dia_semana, status) VALUES (?, ?, ?, ?, 'pendente')")->execute([$usuario_id, $descricao, $valor, $dia_semana]);
+        $msg_sugestao_tarefa = "💡 Tarefa sugerida com valor de {$valor} moedas! A TIA vai avaliar.";
+        $pdo->prepare("INSERT INTO notificacoes (crianca_id, crianca_nome, mensagem) VALUES (?, ?, ?)")->execute([$usuario_id, $nome_usuario, "{$nome_usuario} sugeriu uma tarefa de {$valor} moedas: \"{$descricao}\""]);
+    } else {
+        $msg_sugestao_tarefa = "Preencha a descrição e escolha um dia.";
+    }
+}
+
+// Buscar sugestões de tarefas da criança
+$stmt_tarefas_sugeridas = $pdo->prepare("SELECT * FROM tarefas_semana WHERE usuario_id = ? AND status != 'aprovado' ORDER BY id DESC LIMIT 20");
+$stmt_tarefas_sugeridas->execute([$usuario_id]);
+$tarefas_sugeridas = $stmt_tarefas_sugeridas->fetchAll();
+
 // Processar sugestão de prêmio
 $msg_sugestao = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['sugerir_premio'])) {
@@ -287,6 +323,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enviar_msg_amigo'])) 
     header("Location: tarefas.php?tab_conversa=amigos&conversa=" . $destino . "#tab-mensagens");
     exit;
 }
+
+// ===== SALVAR CONFIGURAÇÕES DO PERFIL (foto + cor fundo) =====
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['salvar_perfil'])) {
+    csrf_validate();
+
+    // Upload de foto
+    if (isset($_FILES['foto_perfil']) && $_FILES['foto_perfil']['error'] === UPLOAD_ERR_OK) {
+        $ext = strtolower(pathinfo($_FILES['foto_perfil']['name'], PATHINFO_EXTENSION));
+        if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'])) {
+            $pasta_foto = __DIR__ . '/imagens/usuarios';
+            if (!is_dir($pasta_foto)) {
+                mkdir($pasta_foto, 0775, true);
+            }
+            // Redimensionar para 200x200
+            $caminho_destino = "{$pasta_foto}/{$usuario_id}.jpg";
+            list($largura_orig, $altura_orig) = getimagesize($_FILES['foto_perfil']['tmp_name']);
+            $ratio = min(200 / $largura_orig, 200 / $altura_orig);
+            $nova_largura = (int)round($largura_orig * $ratio);
+            $nova_altura = (int)round($altura_orig * $ratio);
+            $src = imagecreatefromstring(file_get_contents($_FILES['foto_perfil']['tmp_name']));
+            if ($src) {
+                $dst = imagecreatetruecolor(200, 200);
+                $bg = imagecolorallocate($dst, 255, 255, 255);
+                imagefill($dst, 0, 0, $bg);
+                imagecopyresampled($dst, $src, (int)round((200 - $nova_largura) / 2), (int)round((200 - $nova_altura) / 2), 0, 0, $nova_largura, $nova_altura, $largura_orig, $altura_orig);
+                imagejpeg($dst, $caminho_destino, 85);
+                imagedestroy($src);
+                imagedestroy($dst);
+            }
+        }
+    }
+
+    // Salvar cor de fundo
+    if (isset($_POST['cor_fundo'])) {
+        $cor = trim($_POST['cor_fundo']);
+        $stmt_upd = $pdo->prepare("UPDATE usuarios SET cor_fundo = ? WHERE id = ?");
+        $stmt_upd->execute([$cor, $usuario_id]);
+        $_SESSION['msg_perfil'] = 'Configurações salvas com sucesso!';
+    }
+
+    header("Location: tarefas.php#tab-config");
+    exit;
+}
 ?>
 <!DOCTYPE html>
 <html lang="pt-br">
@@ -296,7 +375,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enviar_msg_amigo'])) 
     <title>Minhas Tarefas - Painel</title>
     <link rel="stylesheet" href="style.css">
 </head>
-<body class="dashboard-body perfil-<?php echo strtolower($nome_usuario); ?>">
+<body class="dashboard-body <?php echo $is_google_user ? 'perfil-neutro' : 'perfil-' . strtolower($nome_usuario); ?><?php if ($tema_claro): ?> tema-claro<?php endif; ?>"<?php if (!empty($cor_fundo)): ?> style="background: <?php echo htmlspecialchars($cor_fundo); ?> !important;"<?php endif; ?>>
 
     <div class="dashboard-layout">
 
@@ -305,7 +384,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enviar_msg_amigo'])) 
             <div class="dash-sidebar-avatar">
                 <?php
                 $nome_lower_sidebar = strtolower($nome_usuario);
-                if ($nome_lower_sidebar === 'rafaela'): ?>
+                $foto_usuario = "imagens/usuarios/{$usuario_id}.jpg";
+                if (file_exists(__DIR__ . '/' . $foto_usuario)): ?>
+                    <img src="<?php echo $foto_usuario; ?>?v=<?php echo time(); ?>" alt="" class="dash-avatar-img">
+                <?php elseif ($nome_lower_sidebar === 'rafaela'): ?>
                     <img src="imagens/foto-rafa.jpg" alt="Rafaela" class="dash-avatar-img">
                 <?php elseif ($nome_lower_sidebar === 'miguel'): ?>
                     <img src="imagens/foto-miguelperfil.png" alt="Miguel" class="dash-avatar-img">
@@ -344,6 +426,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enviar_msg_amigo'])) 
                 </button>
                 <button class="dash-nav-item" data-tab="sugerir">
                     <span>💡</span> Sugerir Prêmio
+                </button>
+                <button class="dash-nav-item" data-tab="sugerir-tarefa">
+                    <span>📝</span> Sugerir Tarefa
+                </button>
+                <button class="dash-nav-item" data-tab="config">
+                    <span>⚙️</span> Configurações
                 </button>
             </nav>
 
@@ -665,6 +753,14 @@ foreach ($badges as $b) { if ($progresso_porcentagem >= $b[0]) $progresso_badge 
 
                 <?php if (!empty($msg_loja)): ?>
                     <div class="loja-mensagem"><?php echo $msg_loja; ?></div>
+                <?php endif; ?>
+
+                <?php if ($is_google_user || !empty($_SESSION['recado_premios'])): ?>
+                    <?php unset($_SESSION['recado_premios']); ?>
+                    <div class="loja-mensagem aviso-google">
+                        💡 <strong>Perfil criado com Google!</strong><br>
+                        Seu perfil usa um tema neutro. No momento, você não se adequa para ganhar temas personalizados na roleta de prêmios. Continue completando tarefas para resgatar prêmios em dinheiro!
+                    </div>
                 <?php endif; ?>
 
                 <?php
@@ -1037,6 +1133,147 @@ foreach ($badges as $b) { if ($progresso_porcentagem >= $b[0]) $progresso_badge 
                 <?php endif; ?>
             </section>
 
+            <!-- ===== TAB: SUGERIR TAREFA ===== -->
+            <section class="dash-tab" id="dash-tab-sugerir-tarefa" style="display:none">
+                <div class="header-card">
+                    <h1>📝 Sugerir Tarefa</h1>
+                    <p style="font-size:13px;color:var(--text-muted, #94a3b8);margin:4px 0 0">Quer uma tarefa nova? Sugira aqui e a TIA vai avaliar!</p>
+                </div>
+
+                <?php if (!empty($msg_sugestao_tarefa)): ?>
+                    <div class="loja-mensagem" style="margin-bottom:16px"><?php echo $msg_sugestao_tarefa; ?></div>
+                <?php endif; ?>
+
+                <div class="task-card" style="flex-direction:column;align-items:stretch;gap:12px">
+                    <h3 style="margin:0;font-size:16px">✍️ Sugerir Nova Tarefa</h3>
+                    <form method="POST" style="display:flex;flex-direction:column;gap:10px">
+                        <div style="display:flex;gap:10px;flex-wrap:wrap">
+                            <select name="dia_semana_tarefa" required style="flex:1;min-width:180px;padding:11px 14px;border:1px solid rgba(255,255,255,0.1);border-radius:8px;font-size:14px;font-family:inherit;color:#fff;background:rgba(0,0,0,0.3);outline:none">
+                                <option value="">Dia da semana...</option>
+                                <?php foreach ($dias_nomes as $key => $nome): ?>
+                                    <option value="<?php echo $key; ?>"><?php echo $nome; ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <input type="number" name="valor_tarefa" value="1" min="1" max="99" style="width:80px;padding:11px 10px;border:1px solid rgba(255,255,255,0.1);border-radius:8px;font-size:14px;font-family:inherit;color:#fff;background:rgba(0,0,0,0.3);outline:none;text-align:center" title="Valor em moedas">
+                        </div>
+                        <input type="text" name="descricao_tarefa" class="msg-input" placeholder="Descrição da tarefa (ex: Lavar a louça)" required maxlength="255" autocomplete="off" style="width:100%;box-sizing:border-box">
+                        <button type="submit" name="sugerir_tarefa" class="btn-concluir" style="padding:12px 20px;font-size:15px;border:none;border-radius:8px;cursor:pointer">📝 Sugerir Tarefa</button>
+                    </form>
+                </div>
+
+                <?php if (count($tarefas_sugeridas) > 0): ?>
+                    <div class="section-title" style="margin-top:24px">📋 Minhas Sugestões de Tarefa</div>
+                    <?php foreach ($tarefas_sugeridas as $st): ?>
+                        <?php
+                        $status_icon = $st['status'] === 'aprovado' ? '✅' : ($st['status'] === 'recusado' ? '❌' : '⏳');
+                        $status_texto = $st['status'] === 'aprovado' ? 'Aprovada!' : ($st['status'] === 'recusado' ? 'Recusada' : 'Pendente');
+                        $status_class = $st['status'] === 'aprovado' ? 'sugestao-aprovada' : ($st['status'] === 'recusado' ? 'sugestao-recusada' : 'sugestao-pendente');
+                        $dia_nome = $dias_nomes[(int)$st['dia_semana']];
+                        ?>
+                        <div class="task-card sugestao-card <?php echo $status_class; ?>" style="justify-content:flex-start;gap:12px">
+                            <span style="font-size:22px"><?php echo $status_icon; ?></span>
+                            <div style="flex:1;display:flex;flex-direction:column">
+                                <strong style="font-size:15px"><?php echo htmlspecialchars($st['descricao']); ?></strong>
+                                <span style="font-size:13px;color:#94a3b8">📅 <?php echo $dia_nome; ?> • +<?php echo (int)$st['valor']; ?> 💰</span>
+                            </div>
+                            <span class="sugestao-status <?php echo $status_class; ?>"><?php echo $status_texto; ?></span>
+                        </div>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            </section>
+
+            <!-- ===== TAB: CONFIGURAÇÕES ===== -->
+            <section class="dash-tab" id="dash-tab-config" style="display:none">
+                <div class="tab-header">
+                    <h2>⚙️ Configurações do Perfil</h2>
+                    <p>Personalize sua foto e o fundo da tela!</p>
+                </div>
+
+                <?php if (isset($_SESSION['msg_perfil'])): ?>
+                    <div class="loja-mensagem" style="background:rgba(16,185,129,0.15);border-color:#10b981;color:#10b981;">
+                        <?php echo htmlspecialchars($_SESSION['msg_perfil']); unset($_SESSION['msg_perfil']); ?>
+                    </div>
+                <?php endif; ?>
+
+                <div id="config-grid">
+                    <!-- Card: Foto -->
+                    <div class="task-card" style="padding:24px;">
+                        <h3 style="margin-bottom:16px;font-size:18px;">📷 Sua Foto</h3>
+                        <div style="text-align:center;margin-bottom:16px;">
+                            <?php
+                            $foto_config = "imagens/usuarios/{$usuario_id}.jpg";
+                            if (file_exists(__DIR__ . '/' . $foto_config)): ?>
+                                <img src="<?php echo $foto_config; ?>?v=<?php echo time(); ?>" alt="" style="width:120px;height:120px;border-radius:50%;object-fit:cover;border:3px solid rgba(255,255,255,0.2);">
+                            <?php else: ?>
+                                <div style="width:120px;height:120px;border-radius:50%;background:rgba(255,255,255,0.1);display:flex;align-items:center;justify-content:center;font-size:48px;margin:0 auto;border:3px solid rgba(255,255,255,0.2);">
+                                    <?php echo strtoupper(substr($nome_usuario, 0, 1)); ?>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                        <form method="POST" enctype="multipart/form-data">
+                            <input type="hidden" name="salvar_perfil" value="1">
+                            <input type="hidden" name="csrf_token" value="<?php echo csrf_token(); ?>">
+                            <input type="file" name="foto_perfil" accept="image/*" style="width:100%;padding:8px;background:rgba(255,255,255,0.08);border:1px dashed rgba(255,255,255,0.2);border-radius:8px;color:#FFFFFF;margin-bottom:12px;cursor:pointer;">
+                            <button type="submit" class="btn-dash">Enviar Foto</button>
+                        </form>
+                    </div>
+
+                    <!-- Card: Cor de Fundo -->
+                    <div class="task-card" style="padding:24px;">
+                        <h3 style="margin-bottom:16px;font-size:18px;">🎨 Cor do Fundo</h3>
+                        <p style="margin-bottom:16px;opacity:0.8;">Clique no seletor abaixo e arraste para escolher qualquer cor:</p>
+                        <form method="POST" id="form-cor-fundo">
+                            <input type="hidden" name="salvar_perfil" value="1">
+                            <input type="hidden" name="csrf_token" value="<?php echo csrf_token(); ?>">
+                            <input type="hidden" name="cor_fundo" id="cor_fundo_input" value="<?php echo htmlspecialchars($cor_fundo); ?>">
+                            <!-- Google-style native color picker (drag gradient/hue) -->
+                            <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px;">
+                                <input type="color" id="colorPicker" value="<?php echo $cor_fundo ?: '#2c3e50'; ?>" style="width:70px;height:70px;border:3px solid rgba(255,255,255,0.2);border-radius:16px;padding:3px;cursor:pointer;background:transparent;">
+                                <div style="flex:1;height:70px;border-radius:16px;background:<?php echo $cor_fundo ?: '#2c3e50'; ?>;border:2px solid rgba(255,255,255,0.15);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:600;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,0.5);" id="colorPreview">
+                                    <?php echo $cor_fundo ?: '#2c3e50'; ?>
+                                </div>
+                            </div>
+                            <!-- Quick presets compactas -->
+                            <p style="margin-bottom:10px;opacity:0.7;font-size:13px;">Cores rápidas:</p>
+                            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;">
+                                <?php
+                                $cores_rapidas = [
+                                    '#2c3e50', '#34495e', '#1a1a2e', '#0f3460', '#16213e',
+                                    '#2980b9', '#3498db', '#48dbfb', '#45aaf2', '#4b7bec',
+                                    '#6c5ce7', '#a55eea', '#9b59b6', '#8e44ad', '#533483',
+                                    '#e74c3c', '#e94560', '#fc5c65', '#eb3b5a', '#c0392b',
+                                    '#fd79a8', '#ff9ff3', '#cf6a87', '#f8a5c2', '#fab1a0',
+                                    '#ff6b6b', '#e17055', '#d35400', '#e15f41', '#fd9644',
+                                    '#f39c12', '#feca57', '#fed330', '#fcb045', '#f19066',
+                                    '#2ecc71', '#27ae60', '#16a085', '#00b894', '#26de81',
+                                    '#78e08f', '#2bcbba', '#00cec9', '#63cdda', '#81ecec',
+                                    '#7f8c8d', '#636e72', '#dfe6e9', '#303952', '#0c2461',
+                                    '#1e3799', '#3b3b98', '#574b90', '#786fa6', '#a29bfe',
+                                    '#778beb', '#3dc1d3', '#b71540', '#eb2f06', '#f3a683',
+                                ];
+                                foreach ($cores_rapidas as $codigo):
+                                    $sel = ($cor_fundo === $codigo) ? 'transform:scale(1.2);box-shadow:0 0 0 2px #fff,0 0 10px rgba(255,255,255,0.3);' : '';
+                                ?>
+                                    <button type="button" class="cor-opcao cor-rapida" data-cor="<?php echo $codigo; ?>" style="background:<?php echo $codigo; ?>;width:32px;height:32px;border-radius:8px;border:2px solid rgba(255,255,255,0.15);cursor:pointer;<?php echo $sel; ?>" title="<?php echo $codigo; ?>"></button>
+                                <?php endforeach; ?>
+                            </div>
+                            <button type="submit" class="btn-dash">Salvar Cor</button>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="task-card" style="padding:24px;margin-top:20px;">
+                    <h3 style="margin-bottom:12px;font-size:18px;">🔄 Restaurar Padrão</h3>
+                    <p style="opacity:0.8;margin-bottom:12px;">Volte ao fundo original do seu perfil.</p>
+                    <form method="POST">
+                        <input type="hidden" name="salvar_perfil" value="1">
+                        <input type="hidden" name="csrf_token" value="<?php echo csrf_token(); ?>">
+                        <input type="hidden" name="cor_fundo" value="">
+                        <button type="submit" class="btn-dash btn-restaurar">Restaurar</button>
+                    </form>
+                </div>
+            </section>
+
             <!-- ===== TAB: RANKING ===== -->
             <section class="dash-tab" id="dash-tab-ranking" style="display:none">
                 <div class="tab-header">
@@ -1071,6 +1308,10 @@ foreach ($badges as $b) { if ($progresso_porcentagem >= $b[0]) $progresso_badge 
                                         if ($nome_lower === 'rafaela') $foto_arquivo = 'foto-rafa.jpg';
                                         elseif ($nome_lower === 'miguel') $foto_arquivo = 'foto-miguelperfil.png';
                                         elseif ($nome_lower === 'nicole') { $foto_arquivo = 'perfil-nick.jpg'; $foto_pasta = 'imagens/'; }
+                                        elseif (file_exists(__DIR__ . "/imagens/usuarios/{$r['id']}.jpg")) {
+                                            $foto_arquivo = "usuarios/{$r['id']}.jpg";
+                                            $foto_pasta = 'imagens/';
+                                        }
                                         if ($foto_arquivo):
                                         ?>
                                             <img src="<?php echo $foto_pasta . $foto_arquivo; ?>" alt="" class="ranking-avatar-img">
@@ -1169,6 +1410,41 @@ foreach ($badges as $b) { if ($progresso_porcentagem >= $b[0]) $progresso_badge 
 
         hamburger.addEventListener('click', toggleSidebar);
         overlay.addEventListener('click', closeSidebar);
+
+        // Color picker — native input sync + quick presets + preview
+        var colorPicker = document.getElementById('colorPicker');
+        var colorPreview = document.getElementById('colorPreview');
+        var corInput = document.getElementById('cor_fundo_input');
+
+        function atualizarCor(cor) {
+            corInput.value = cor;
+            if (colorPreview) {
+                colorPreview.style.background = cor;
+                colorPreview.textContent = cor;
+            }
+            if (colorPicker) colorPicker.value = cor;
+            // Highlight matching quick preset
+            document.querySelectorAll('.cor-rapida').forEach(function(b) {
+                b.style.transform = '';
+                b.style.boxShadow = '';
+                if (b.dataset.cor.toLowerCase() === cor.toLowerCase()) {
+                    b.style.transform = 'scale(1.2)';
+                    b.style.boxShadow = '0 0 0 2px #fff, 0 0 10px rgba(255,255,255,0.3)';
+                }
+            });
+        }
+
+        if (colorPicker) {
+            colorPicker.addEventListener('input', function() {
+                atualizarCor(this.value);
+            });
+        }
+
+        document.querySelectorAll('.cor-rapida').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                atualizarCor(this.dataset.cor);
+            });
+        });
     </script>
     <script>
         var csrfInput = document.createElement('input');

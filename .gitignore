@@ -1,6 +1,8 @@
 config.php
 config-real.php
 conexao.php
+google-config.php
+google-callback.php
 sessions/
 *.log
 .DS_Store
